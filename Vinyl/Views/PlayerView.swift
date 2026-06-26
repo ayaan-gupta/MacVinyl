@@ -46,13 +46,18 @@ struct SpinningCDView: View {
 // Layer order: turntable (static) → record (spins + slides) → tonearm (pivots)
 
 struct PixelTurntableView: View {
-    /// Direction hint from parent: 1 = next track (record exits left), -1 = prev
-    let pendingDirection: CGFloat
     /// Display width of the whole turntable widget
     let width: CGFloat
 
     @ObservedObject private var playerState = PlayerState.shared
     @ObservedObject private var spinner     = VinylSpinner.shared
+
+    private enum Transition {
+        static let slideOut: Double = 0.09
+        static let slideInDelay: Double = 0.04
+        static let slideIn: Double = 0.10
+        static let settle: Double = 0.15
+    }
 
     // ── Record transition state ────────────────────────────────────────────
     @State private var displayedArt:    NSImage?
@@ -62,10 +67,16 @@ struct PixelTurntableView: View {
     @State private var outgoingOffsetX: CGFloat = 0
     @State private var incomingOffsetX: CGFloat = 0
     @State private var showIncoming:    Bool    = false
+    @State private var isExiting:       Bool    = false
     @State private var lastTrackID:     String  = ""
 
     // ── Tonearm state ──────────────────────────────────────────────────────
+    private static let tonearmSweepDuration = 0.7
+
     @State private var tonearmDegrees: Double = PixelTurntableLayout.angleOff
+    @State private var tonearmWiggleActive = false
+    @State private var wiggleStartDate: Date?
+    @State private var tonearmWiggleEnableTask: DispatchWorkItem?
 
     private var ttHeight: CGFloat { PixelTurntableLayout.turntableHeight(forWidth: width) }
     private var recordDiam: CGFloat { PixelTurntableLayout.recordDiameter(forWidth: width) }
@@ -101,36 +112,45 @@ struct PixelTurntableView: View {
         .onAppear {
             displayedArt   = playerState.albumArtImage
             lastTrackID    = playerState.currentTrack.id
-            tonearmDegrees = playerState.isPlaying
-                ? PixelTurntableLayout.angleOn
-                : PixelTurntableLayout.angleOff
+            if playerState.isPlaying {
+                tonearmDegrees = PixelTurntableLayout.angleOn
+                wiggleStartDate = Date()
+                tonearmWiggleActive = true
+            } else {
+                tonearmDegrees = PixelTurntableLayout.angleOff
+            }
             pixelateArt(displayedArt) { pixelatedDisplayedArt = $0 }
         }
-        // Tonearm follows play/pause state
         .onChange(of: playerState.isPlaying) { _, playing in
-            withAnimation(.easeInOut(duration: 0.7)) {
-                tonearmDegrees = playing
-                    ? PixelTurntableLayout.angleOn
-                    : PixelTurntableLayout.angleOff
-            }
+            updateTonearmForPlayback(playing)
         }
-        // New track → slide record out, new one in
+        .onChange(of: playerState.skipExitDirection) { _, direction in
+            guard let direction else { return }
+            beginRecordExit(direction: direction)
+        }
         .onChange(of: playerState.currentTrack) { _, newTrack in
             guard newTrack.id != lastTrackID else { return }
             lastTrackID = newTrack.id
-            triggerRecordSlide(to: playerState.albumArtImage)
+            let direction = playerState.skipDirection ?? 1
+            let art = artForTrack(newTrack)
+            if isExiting {
+                enterRecord(with: art, direction: direction)
+            } else {
+                triggerRecordSlide(to: art, direction: direction)
+            }
         }
-        // Art update during or after transition
         .onChange(of: playerState.albumArtImage) { _, newArt in
+            guard playerState.albumArtTrackID == playerState.currentTrack.id else { return }
             if showIncoming {
                 incomingArt = newArt
                 pixelateArt(newArt) { pixelatedIncomingArt = $0 }
-            } else {
+            } else if playerState.albumArtTrackID == lastTrackID {
                 displayedArt = newArt
                 pixelateArt(newArt) { pixelatedDisplayedArt = $0 }
             }
         }
         .onChange(of: incomingArt) { _, newArt in
+            guard showIncoming else { return }
             pixelateArt(newArt) { pixelatedIncomingArt = $0 }
         }
         .onChange(of: displayedArt) { _, newArt in
@@ -194,43 +214,122 @@ struct PixelTurntableView: View {
                 turntableHeight: ttHeight
             )
 
-            Image(nsImage: ta)
-                .interpolation(.none)
-                .resizable()
-                .frame(width: size.width, height: size.height)
-                .rotationEffect(
-                    .degrees(tonearmDegrees),
-                    anchor: PixelTurntableLayout.tonearmPivotAnchor
-                )
-                .offset(x: offset.x, y: offset.y)
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                Image(nsImage: ta)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: size.width, height: size.height)
+                    .rotationEffect(
+                        .degrees(tonearmDegrees + tonearmWiggle(at: timeline.date)),
+                        anchor: PixelTurntableLayout.tonearmPivotAnchor
+                    )
+                    .offset(x: offset.x, y: offset.y)
+            }
+        }
+    }
+
+    /// Slow ping-pong wobble while the needle is on the record.
+    private func tonearmWiggle(at date: Date) -> Double {
+        guard tonearmWiggleActive, let start = wiggleStartDate else { return 0 }
+        let period = max(PixelTurntableLayout.wigglePeriod, 0.5)
+        let phase = date.timeIntervalSince(start) * (2 * .pi / period)
+        return sin(phase) * PixelTurntableLayout.wiggleDegrees
+    }
+
+    private func updateTonearmForPlayback(_ playing: Bool) {
+        tonearmWiggleEnableTask?.cancel()
+        tonearmWiggleEnableTask = nil
+
+        if playing {
+            tonearmWiggleActive = false
+            wiggleStartDate = nil
+            withAnimation(.easeInOut(duration: Self.tonearmSweepDuration)) {
+                tonearmDegrees = PixelTurntableLayout.angleOn
+            }
+            let task = DispatchWorkItem {
+                guard playerState.isPlaying else { return }
+                wiggleStartDate = Date()
+                tonearmWiggleActive = true
+            }
+            tonearmWiggleEnableTask = task
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.tonearmSweepDuration, execute: task)
+        } else {
+            let wiggle = tonearmWiggleActive ? tonearmWiggle(at: Date()) : 0
+            tonearmWiggleActive = false
+            wiggleStartDate = nil
+
+            var snap = Transaction()
+            snap.disablesAnimations = true
+            withTransaction(snap) {
+                tonearmDegrees += wiggle
+            }
+
+            withAnimation(.easeInOut(duration: Self.tonearmSweepDuration)) {
+                tonearmDegrees = PixelTurntableLayout.angleOff
+            }
         }
     }
 
     // MARK: - Record slide transition
 
-    private func triggerRecordSlide(to newArt: NSImage?) {
+    private func artForTrack(_ track: Track) -> NSImage? {
+        if playerState.albumArtTrackID == track.id { return playerState.albumArtImage }
+        return track.albumArtURL.flatMap { AlbumArtLoader.shared.image(for: $0) }
+    }
+
+    private func beginRecordExit(direction: CGFloat) {
+        guard !isExiting && !showIncoming else { return }
+        playerState.skipExitDirection = nil
+        isExiting = true
+        withAnimation(.easeOut(duration: Transition.slideOut)) {
+            outgoingOffsetX = -direction * recordDiam * 2.2
+        }
+    }
+
+    private func enterRecord(with art: NSImage?, direction: CGFloat) {
+        incomingArt = art
+        pixelatedIncomingArt = nil
+        pixelateArt(art) { pixelatedIncomingArt = $0 }
+        incomingOffsetX = direction * recordDiam * 2.2
+        showIncoming = true
+        isExiting = false
+        withAnimation(.easeOut(duration: Transition.slideIn).delay(Transition.slideInDelay)) {
+            incomingOffsetX = 0
+        }
+        settleRecord(after: Transition.settle, art: art)
+    }
+
+    private func triggerRecordSlide(to newArt: NSImage?, direction: CGFloat) {
         guard !showIncoming else {
             incomingArt = newArt
+            pixelateArt(newArt) { pixelatedIncomingArt = $0 }
             return
         }
-        let dir = pendingDirection   // 1 = next (outgoing exits left), -1 = prev
-        incomingArt     = newArt
-        incomingOffsetX = dir * recordDiam * 2.2
-        showIncoming    = true
 
-        withAnimation(.easeIn(duration: 0.30)) {
-            outgoingOffsetX = -dir * recordDiam * 2.2
+        incomingArt = newArt
+        pixelatedIncomingArt = nil
+        pixelateArt(newArt) { pixelatedIncomingArt = $0 }
+        incomingOffsetX = direction * recordDiam * 2.2
+        showIncoming = true
+
+        withAnimation(.easeOut(duration: Transition.slideOut)) {
+            outgoingOffsetX = -direction * recordDiam * 2.2
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                incomingOffsetX = 0
+        withAnimation(.easeOut(duration: Transition.slideIn).delay(Transition.slideInDelay)) {
+            incomingOffsetX = 0
+        }
+        settleRecord(after: Transition.settle, art: newArt)
+    }
+
+    private func settleRecord(after delay: Double, art: NSImage?) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            displayedArt = art ?? self.incomingArt
+            if self.pixelatedIncomingArt != nil {
+                self.pixelatedDisplayedArt = self.pixelatedIncomingArt
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.68) {
-            displayedArt    = newArt
-            pixelatedDisplayedArt = pixelatedIncomingArt
             outgoingOffsetX = 0
-            showIncoming    = false
+            showIncoming = false
+            isExiting = false
         }
     }
 
@@ -254,8 +353,7 @@ struct PixelTurntableView: View {
         let ciInput = CIImage(cgImage: cgSrc)
         guard let filter = CIFilter(name: "CIPixellate") else { return image }
         filter.setValue(ciInput, forKey: kCIInputImageKey)
-        // Scale so there are ~28 visible "pixels" across the image width.
-        let targetPixelCount: Double = 28
+        let targetPixelCount = max(4, PixelTurntableLayout.artPixelCount)
         let scale = max(2.0, Double(cgSrc.width) / targetPixelCount)
         filter.setValue(scale, forKey: kCIInputScaleKey)
         guard let output = filter.outputImage else { return image }
@@ -356,12 +454,13 @@ struct ControlsView: View {
 
     private var appleControls: some View {
         HStack(spacing: 28) {
-            controlButton("backward.fill", size: 21) { onPrevTap(); AppleScriptBridge.previousTrack() }
+            controlButton("backward.fill", size: 21, action: onPrevTap)
             controlButton(playerState.isPlaying ? "pause.fill" : "play.fill", size: 30) {
-                PlayerState.shared.isPlaying.toggle()
+                PlayerState.shared.togglePlayingOptimistically()
                 AppleScriptBridge.playPause()
+                PollingService.shared.refreshNow()
             }
-            controlButton("forward.fill", size: 21) { onNextTap(); AppleScriptBridge.nextTrack() }
+            controlButton("forward.fill", size: 21, action: onNextTap)
         }
         .frame(maxWidth: .infinity)
     }
@@ -381,20 +480,17 @@ struct ControlsView: View {
     private var pixelControls: some View {
         HStack(spacing: 28) {
             pixelButton("pixel_backwards", fallback: "backward.fill",
-                        height: PixelTheme.controlButtonSize) {
-                onPrevTap(); AppleScriptBridge.previousTrack()
-            }
+                        height: PixelTheme.controlButtonSize, action: onPrevTap)
             // Asset filenames are inverted: playing.png = pause, paused.png = play.
             pixelButton(playerState.isPlaying ? "pixel_playing" : "pixel_paused",
                         fallback: playerState.isPlaying ? "pause.fill" : "play.fill",
                         height: PixelTheme.playButtonSize) {
-                PlayerState.shared.isPlaying.toggle()
+                PlayerState.shared.togglePlayingOptimistically()
                 AppleScriptBridge.playPause()
+                PollingService.shared.refreshNow()
             }
             pixelButton("pixel_forward", fallback: "forward.fill",
-                        height: PixelTheme.controlButtonSize) {
-                onNextTap(); AppleScriptBridge.nextTrack()
-            }
+                        height: PixelTheme.controlButtonSize, action: onNextTap)
         }
         .frame(maxWidth: .infinity)
     }

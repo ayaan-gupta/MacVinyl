@@ -37,12 +37,13 @@ final class HotkeyService {
                 if code == b.keyCode && NSEvent.ModifierFlags(rawValue: b.modifierRaw) == mods {
                     switch action {
                     case .playPause:
-                        PlayerState.shared.isPlaying.toggle()
+                        PlayerState.shared.togglePlayingOptimistically()
                         AppleScriptBridge.playPause()
+                        PollingService.shared.refreshNow()
                     case .previous:
-                        AppleScriptBridge.previousTrack()
+                        PlayerState.shared.requestSkip(direction: -1)
                     case .next:
-                        AppleScriptBridge.nextTrack()
+                        PlayerState.shared.requestSkip(direction: 1)
                     }
                     break
                 }
@@ -84,12 +85,15 @@ final class HotkeyService {
         guard keyDown else { return nil }
         switch keyCode {
         case Int(NX_KEYTYPE_PLAY):
-            PlayerState.shared.isPlaying.toggle()
-            AppleScriptBridge.playPause()
+            DispatchQueue.main.async {
+                PlayerState.shared.togglePlayingOptimistically()
+                AppleScriptBridge.playPause()
+                PollingService.shared.refreshNow()
+            }
         case Int(NX_KEYTYPE_NEXT):
-            AppleScriptBridge.nextTrack()
+            DispatchQueue.main.async { PlayerState.shared.requestSkip(direction: 1) }
         case Int(NX_KEYTYPE_PREVIOUS):
-            AppleScriptBridge.previousTrack()
+            DispatchQueue.main.async { PlayerState.shared.requestSkip(direction: -1) }
         default:
             return Unmanaged.passRetained(event)
         }

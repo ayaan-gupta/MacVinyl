@@ -78,11 +78,24 @@ private struct BackgroundView: View {
             ZStack {
                 Color.black
                 if let img = playerState.albumArtImage {
+                    // Large blur radius makes the color distribution more uniform top-to-bottom.
+                    // The gradient overlay darkens the top and bottom so the top-bar area
+                    // blends into the colorful CD region without a visible band.
                     Image(nsImage: img)
                         .resizable()
                         .scaledToFill()
-                        .blur(radius: 50, opaque: true)
-                        .overlay(Color.black.opacity(0.40))
+                        .blur(radius: 70, opaque: true)
+                        .overlay(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.62),
+                                    Color.black.opacity(0.36),
+                                    Color.black.opacity(0.50)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                         .transition(.opacity)
                 } else {
                     LinearGradient(
@@ -95,7 +108,15 @@ private struct BackgroundView: View {
 
         case .pixel:
             if let bg = NSImage(named: "pixel_background") {
-                Image(nsImage: bg).interpolation(.none).resizable().scaledToFill()
+                GeometryReader { geo in
+                    let imageHeight = geo.size.width * (bg.size.height / max(bg.size.width, 1))
+                    Image(nsImage: bg)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: geo.size.width, height: imageHeight)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                        .clipped()
+                }
             } else {
                 Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
             }
@@ -119,8 +140,14 @@ struct PlayerContentView: View {
     @State private var incomingImage: NSImage? = nil
     @State private var showIncoming = false
     @State private var isExiting = false
-    @State private var pendingDirection: CGFloat = 1
     @State private var showQueue = false
+
+    private enum Transition {
+        static let slideOut: Double = 0.09
+        static let slideInDelay: Double = 0.04
+        static let slideIn: Double = 0.10
+        static let settle: Double = 0.15
+    }
 
     init(playerState: PlayerState, onShowSettings: @escaping () -> Void) {
         self.playerState = playerState
@@ -172,8 +199,8 @@ struct PlayerContentView: View {
                 playerState: playerState,
                 accentColor: Color(playerState.accentColor),
                 theme: themeSettings.active,
-                onNextTap: { beginExit(direction: 1) },
-                onPrevTap: { beginExit(direction: -1) }
+                onNextTap: { playerState.requestSkip(direction: 1) },
+                onPrevTap: { playerState.requestSkip(direction: -1) }
             )
             .padding(.horizontal, isApple ? 14 : 10)
             .padding(.bottom, isApple ? 12 : 8)
@@ -189,21 +216,27 @@ struct PlayerContentView: View {
         .onChange(of: playerState.isPlaying) { _, _ in syncSpinner() }
         .onChange(of: playerState.progress) { _, _ in syncSpinner() }
         .onAppear { syncSpinner() }
+        .onChange(of: playerState.skipExitDirection) { _, direction in
+            guard let direction else { return }
+            beginExit(direction: direction)
+        }
         .onChange(of: playerState.currentTrack) { _, newTrack in
             guard newTrack.id != displayedTrack.id else { return }
-            let art = playerState.albumArtImage ?? displayedImage
+            let direction = playerState.skipDirection ?? 1
+            let art = artForTrack(newTrack)
             if isExiting {
-                enterWith(newTrack, image: art)
-            } else if showIncoming {
-                incomingTrack = newTrack
-                incomingImage = art
+                enterWith(newTrack, image: art, direction: direction)
             } else {
-                fullTransition(to: newTrack, image: art)
+                runTransition(to: newTrack, image: art, direction: direction)
             }
         }
         .onChange(of: playerState.albumArtImage) { _, img in
-            if showIncoming { incomingImage = img }
-            else { displayedImage = img }
+            guard playerState.albumArtTrackID == playerState.currentTrack.id else { return }
+            if showIncoming, playerState.albumArtTrackID == incomingTrack.id {
+                incomingImage = img
+            } else if !showIncoming, playerState.albumArtTrackID == displayedTrack.id {
+                displayedImage = img
+            }
         }
     }
 
@@ -229,10 +262,7 @@ struct PlayerContentView: View {
 
     private var pixelMainSection: some View {
         VStack(spacing: 4) {
-            PixelTurntableView(
-                pendingDirection: pendingDirection,
-                width: contentWidth - 6
-            )
+            PixelTurntableView(width: contentWidth - 6)
 
             ZStack {
                 pixelTrackInfo(track: displayedTrack)
@@ -337,48 +367,63 @@ struct PlayerContentView: View {
 
     // MARK: - Transitions
 
+    private func artForTrack(_ track: Track) -> NSImage? {
+        if playerState.albumArtTrackID == track.id { return playerState.albumArtImage }
+        return track.albumArtURL.flatMap { AlbumArtLoader.shared.image(for: $0) }
+    }
+
     private func beginExit(direction: CGFloat) {
         guard !isExiting && !showIncoming else { return }
-        pendingDirection = direction
+        playerState.skipExitDirection = nil
         isExiting = true
         if isApple { VinylSpinner.shared.targetDegreesPerSecond = 0 }
-        withAnimation(.easeIn(duration: 0.18)) {
+        withAnimation(.easeOut(duration: Transition.slideOut)) {
             outgoingX = -direction * slideWidth
         }
-        PollingService.shared.refreshNow()
     }
 
-    private func enterWith(_ newTrack: Track, image: NSImage?) {
+    private func enterWith(_ newTrack: Track, image: NSImage?, direction: CGFloat) {
         incomingTrack = newTrack
         incomingImage = image
-        incomingX = pendingDirection * slideWidth
+        incomingX = direction * slideWidth
         showIncoming = true
         isExiting = false
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) { incomingX = 0 }
-        finalise(after: 0.40)
+        withAnimation(.easeOut(duration: Transition.slideIn).delay(Transition.slideInDelay)) {
+            incomingX = 0
+        }
+        finalise(after: Transition.settle)
     }
 
-    private func fullTransition(to newTrack: Track, image: NSImage?) {
-        let dir = pendingDirection
+    private func runTransition(to newTrack: Track, image: NSImage?, direction: CGFloat) {
+        guard !showIncoming else {
+            incomingTrack = newTrack
+            incomingImage = image
+            return
+        }
+
         incomingTrack = newTrack
         incomingImage = image
-        incomingX = dir * slideWidth
+        incomingX = direction * slideWidth
         showIncoming = true
         if isApple { VinylSpinner.shared.targetDegreesPerSecond = 0 }
-        withAnimation(.easeIn(duration: 0.22)) { outgoingX = -dir * slideWidth }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) { incomingX = 0 }
+
+        withAnimation(.easeOut(duration: Transition.slideOut)) {
+            outgoingX = -direction * slideWidth
         }
-        finalise(after: 0.56)
+        withAnimation(.easeOut(duration: Transition.slideIn).delay(Transition.slideInDelay)) {
+            incomingX = 0
+        }
+        finalise(after: Transition.settle)
     }
 
     private func finalise(after delay: Double) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             displayedTrack = incomingTrack
-            displayedImage = incomingImage
+            displayedImage = incomingImage ?? artForTrack(incomingTrack)
             outgoingX = 0
             showIncoming = false
-            pendingDirection = 1
+            isExiting = false
+            playerState.skipDirection = nil
             syncSpinner()
         }
     }

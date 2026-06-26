@@ -77,11 +77,16 @@ final class MenuBarIconCoordinator: NSObject {
         hostView = SpinningMenuBarView(frame: NSRect(x: 0, y: 0, width: size, height: size))
         super.init()
 
-        // Album art
-        PlayerState.shared.$albumArtImage
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] img in self?.hostView.updateImage(img) }
-            .store(in: &cancellables)
+        // Album art — only show when it matches the current track
+        Publishers.CombineLatest3(
+            PlayerState.shared.$albumArtImage,
+            PlayerState.shared.$albumArtTrackID,
+            PlayerState.shared.$currentTrack
+        )
+        .receive(on: DispatchQueue.main)
+        .map { img, artID, track in artID == track.id ? img : nil }
+        .sink { [weak self] img in self?.hostView.updateImage(img) }
+        .store(in: &cancellables)
 
         // Angle — driven by VinylSpinner.shared so it's identical to the popover CD
         VinylSpinner.shared.$angleDegrees
@@ -91,7 +96,9 @@ final class MenuBarIconCoordinator: NSObject {
     }
 
     func sync() {
-        hostView.updateImage(PlayerState.shared.albumArtImage)
+        let state = PlayerState.shared
+        let img = state.albumArtTrackID == state.currentTrack.id ? state.albumArtImage : nil
+        hostView.updateImage(img)
         hostView.applyAngle(VinylSpinner.shared.angleDegrees)
     }
 }

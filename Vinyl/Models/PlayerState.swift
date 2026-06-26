@@ -11,7 +11,19 @@ final class PlayerState: ObservableObject {
     @Published var queue: [Track] = []
     @Published var accentColor: NSColor = NSColor(red: 0.4, green: 0.3, blue: 0.8, alpha: 1)
     @Published var albumArtImage: NSImage? = nil
+    /// The track id (`title|artist`) that `albumArtImage` belongs to.
+    @Published var albumArtTrackID: String = ""
     @Published var authState: AuthState = .unauthenticated
+    /// Set when the user skips; consumed when a new track is detected. 1 = next, -1 = prev.
+    @Published var skipDirection: CGFloat? = nil
+    /// Triggers an immediate slide-out animation when the user presses skip.
+    @Published var skipExitDirection: CGFloat? = nil
+
+    /// Spotify restarts the current track when previous is pressed after this many seconds.
+    static let skipRestartThreshold: TimeInterval = 3
+
+    /// Ignores contradictory Spotify poll updates briefly after local play/pause.
+    private var playbackPollGraceUntil: Date?
 
     enum AuthState {
         case unauthenticated
@@ -20,4 +32,33 @@ final class PlayerState: ObservableObject {
     }
 
     private init() {}
+
+    func togglePlayingOptimistically() {
+        isPlaying.toggle()
+        playbackPollGraceUntil = Date().addingTimeInterval(1.5)
+    }
+
+    func applyPlaybackStateFromPoll(_ playing: Bool) {
+        if let until = playbackPollGraceUntil, Date() < until, playing != isPlaying {
+            return
+        }
+        if playing == isPlaying {
+            playbackPollGraceUntil = nil
+        }
+        isPlaying = playing
+    }
+
+    func requestSkip(direction: CGFloat) {
+        if direction < 0 && progress > Self.skipRestartThreshold {
+            AppleScriptBridge.previousTrack()
+            PollingService.shared.refreshNow()
+            return
+        }
+        let previousKey = currentTrack.id
+        skipDirection = direction
+        skipExitDirection = direction
+        if direction > 0 { AppleScriptBridge.nextTrack() }
+        else { AppleScriptBridge.previousTrack() }
+        PollingService.shared.pollUntilTrackChanges(from: previousKey)
+    }
 }

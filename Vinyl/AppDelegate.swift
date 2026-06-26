@@ -150,12 +150,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playerState.$isPlaying
             .receive(on: DispatchQueue.main)
             .sink { playing in
-                // PlayerContentView overrides this when open; this is the fallback
                 if VinylSpinner.shared.targetDegreesPerSecond == 0 && playing {
                     VinylSpinner.shared.targetDegreesPerSecond = 120
                 } else if !playing {
                     VinylSpinner.shared.targetDegreesPerSecond = 0
                 }
+            }
+            .store(in: &cancellables)
+
+        // Reset popover contentSize immediately on theme switch so the new theme's
+        // layout starts from a clean slate instead of the previous theme's height.
+        themeSettings.$active
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, let pop = self.popover else { return }
+                pop.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 420)
             }
             .store(in: &cancellables)
     }

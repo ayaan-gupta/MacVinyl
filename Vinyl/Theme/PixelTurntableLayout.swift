@@ -20,6 +20,12 @@ enum PixelTurntableLayout {
     /// Album-art hole size as a fraction of record diameter.
     static var artHoleScale: CGFloat = 0.36
 
+    // MARK: Album art pixelation
+
+    /// Number of visible pixel blocks across the album-art width.
+    /// Lower = chunkier / more pixelated. Higher = sharper / less pixelated. Try 12–48.
+    static var artPixelCount: Double = 38
+
     // MARK: Tonearm size
 
     /// Tonearm image height as a fraction of turntable height.
@@ -33,7 +39,7 @@ enum PixelTurntableLayout {
 
     /// Pivot Y from turntable center, as a fraction of turntable height.
     /// Negative = above center, positive = below center.
-    static var pivotYFraction: CGFloat = -0.285
+    static var pivotYFraction: CGFloat = -0.28
 
     // MARK: Tonearm pivot anchor (on the tonearm image)
 
@@ -47,10 +53,18 @@ enum PixelTurntableLayout {
 
     /// Arm angle when paused (off the record).
     /// Increase to rotate clockwise; decrease for counter-clockwise.
-    static var angleOff: Double = 0
+    static var angleOff: Double = 8
 
     /// Arm angle when playing (on the record).
-    static var angleOn: Double = 30
+    static var angleOn: Double = 40
+
+    // MARK: Tonearm wiggle (while playing)
+
+    /// How many degrees the tonearm rocks back and forth on the record.
+    static var wiggleDegrees: Double = 2.0
+
+    /// Seconds for one full ping-pong cycle (there and back).
+    static var wigglePeriod: Double = 5.0
 
     // MARK: Derived helpers (used by PixelTurntableView)
 

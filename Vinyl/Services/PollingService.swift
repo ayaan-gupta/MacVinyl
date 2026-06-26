@@ -8,6 +8,7 @@ final class PollingService {
     private var tickCount = 0
     private var lastTrackKey: String = ""
     private var pendingQueueFetch: DispatchWorkItem?
+    private var skipPollGeneration = 0
 
     private init() {}
 
@@ -27,10 +28,36 @@ final class PollingService {
         ProgressInterpolator.shared.stop()
     }
 
-    /// Force an immediate full state refresh outside the timer cycle.
-    /// Call this right after a skip command so track detection is near-instant.
     func refreshNow() {
         DispatchQueue.global(qos: .utility).async { [weak self] in self?.fetchFullState() }
+    }
+
+    /// Rapidly polls Spotify until the track identity changes (after skip).
+    func pollUntilTrackChanges(from previousKey: String) {
+        skipPollGeneration += 1
+        let generation = skipPollGeneration
+        attemptTrackChange(excluding: previousKey, generation: generation, attempt: 0)
+    }
+
+    private func attemptTrackChange(excluding previousKey: String, generation: Int, attempt: Int) {
+        guard generation == skipPollGeneration, attempt < 40 else { return }
+
+        AppleScriptBridge.fetchTrackInfo { [weak self] info in
+            guard let self, generation == self.skipPollGeneration else { return }
+            guard let info else { return }
+
+            let key = "\(info.title)|\(info.artist)"
+            if key != previousKey {
+                self.lastTrackKey = key
+                self.publishTrackInfo(info, key: key, trackChanged: true)
+                return
+            }
+
+            let delay = attempt < 8 ? 0.05 : 0.1
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
+                self.attemptTrackChange(excluding: previousKey, generation: generation, attempt: attempt + 1)
+            }
+        }
     }
 
     private func tick() {
@@ -50,8 +77,8 @@ final class PollingService {
         AppleScriptBridge.fetchPlayerState { state in
             DispatchQueue.main.async {
                 switch state {
-                case .playing:  PlayerState.shared.isPlaying = true
-                default:        PlayerState.shared.isPlaying = false
+                case .playing:  PlayerState.shared.applyPlaybackStateFromPoll(true)
+                default:        PlayerState.shared.applyPlaybackStateFromPoll(false)
                 }
             }
         }
@@ -61,52 +88,56 @@ final class PollingService {
             let key = "\(info.title)|\(info.artist)"
             let trackChanged = key != self.lastTrackKey
             self.lastTrackKey = key
-
-            DispatchQueue.main.async {
-                let state = PlayerState.shared
-
-                let updated = Track(
-                    id: key,
-                    title: info.title,
-                    artist: info.artist,
-                    albumArtURL: info.artworkURL ?? (trackChanged ? nil : state.currentTrack.albumArtURL),
-                    duration: info.durationSeconds
-                )
-                if state.currentTrack != updated {
-                    state.currentTrack = updated
-                }
-
-                guard trackChanged else { return }
-                state.progress = 0
-
-                // Use AppleScript artwork URL directly — no Spotify auth needed
-                if let artURL = info.artworkURL {
-                    self.loadAlbumArt(from: artURL)
-                }
-
-                // Enrich with queue from Web API when authenticated
-                if SpotifyWebAPI.shared.isAuthenticated {
-                    SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
-                        if let track { state.currentTrack = track }
-                        if let artURL, state.albumArtImage == nil {
-                            self.loadAlbumArt(from: artURL)
-                        }
-                        let queueID = track?.id ?? key
-                        self.scheduleQueueFetch(for: queueID)
-                    }
-                }
-            }
+            self.publishTrackInfo(info, key: key, trackChanged: trackChanged)
         }
     }
 
-    private func loadAlbumArt(from url: URL) {
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data, let image = NSImage(data: data) else { return }
-            DispatchQueue.main.async { PlayerState.shared.albumArtImage = image }
-            ColorExtractor.dominantColor(from: image) { color in
-                PlayerState.shared.accentColor = color
+    private func publishTrackInfo(_ info: AppleScriptBridge.TrackInfo, key: String, trackChanged: Bool) {
+        DispatchQueue.main.async {
+            let state = PlayerState.shared
+
+            let updated = Track(
+                id: key,
+                title: info.title,
+                artist: info.artist,
+                albumArtURL: info.artworkURL ?? (trackChanged ? nil : state.currentTrack.albumArtURL),
+                duration: info.durationSeconds
+            )
+            if state.currentTrack != updated {
+                state.currentTrack = updated
             }
-        }.resume()
+
+            guard trackChanged else { return }
+            state.progress = 0
+
+            if let artURL = info.artworkURL {
+                if let cached = AlbumArtLoader.shared.image(for: artURL) {
+                    state.albumArtTrackID = key
+                    state.albumArtImage = cached
+                }
+                AlbumArtLoader.shared.load(trackID: key, url: artURL)
+            }
+
+            if SpotifyWebAPI.shared.isAuthenticated {
+                SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
+                    if let track {
+                        let merged = Track(
+                            id: key,
+                            title: track.title,
+                            artist: track.artist,
+                            albumArtURL: track.albumArtURL ?? state.currentTrack.albumArtURL,
+                            duration: track.duration
+                        )
+                        if state.currentTrack != merged { state.currentTrack = merged }
+                    }
+                    if let artURL {
+                        AlbumArtLoader.shared.load(trackID: key, url: artURL)
+                    }
+                    let queueID = track?.id ?? key
+                    self.scheduleQueueFetch(for: queueID)
+                }
+            }
+        }
     }
 
     private func scheduleQueueFetch(for trackID: String) {

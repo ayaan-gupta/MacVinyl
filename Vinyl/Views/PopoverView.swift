@@ -14,8 +14,9 @@ struct VisualEffectView: NSViewRepresentable {
         self.material = material; self.blendingMode = blendingMode
     }
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView(); v.material = material
-        v.blendingMode = blendingMode; v.state = .active; return v
+        let v = NSVisualEffectView()
+        v.material = material; v.blendingMode = blendingMode; v.state = .active
+        return v
     }
     func updateNSView(_ v: NSVisualEffectView, context: Context) {
         v.material = material; v.blendingMode = blendingMode
@@ -31,12 +32,11 @@ struct PopoverView: View {
 
     @State private var showSettings = false
 
-    private var contentWidth: CGFloat {
-        themeSettings.active == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            BackgroundView(playerState: playerState, theme: themeSettings.active)
+                .ignoresSafeArea()
+
             if showSettings {
                 SettingsView(playerState: playerState,
                              onDismiss: { withAnimation { showSettings = false } })
@@ -54,11 +54,12 @@ struct PopoverView: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
-        .frame(width: contentWidth)
-        .background(BackgroundView(playerState: playerState, theme: themeSettings.active))
-        .background(GeometryReader { geo in
-            Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
-        })
+        .frame(width: AppleTheme.popoverWidth)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
+            }
+        )
         .onPreferenceChange(SizePreferenceKey.self) { onSizeChange?($0) }
     }
 }
@@ -75,16 +76,21 @@ private struct BackgroundView: View {
             ZStack {
                 Color.black
                 if let img = playerState.albumArtImage {
-                    Image(nsImage: img).resizable().scaledToFill()
-                        .blur(radius: 48, opaque: true)
-                        .overlay(Color.black.opacity(0.42))
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 50, opaque: true)
+                        .overlay(Color.black.opacity(0.40))
+                        .transition(.opacity)
                 } else {
-                    LinearGradient(colors: [Color(white: 0.16), Color(white: 0.06)],
-                                   startPoint: .top, endPoint: .bottom)
+                    LinearGradient(
+                        colors: [Color(white: 0.16), Color(white: 0.06)],
+                        startPoint: .top, endPoint: .bottom
+                    )
                 }
-                VisualEffectView(material: .hudWindow, blendingMode: .withinWindow).opacity(0.13)
             }
-            .animation(.easeInOut(duration: 0.9), value: playerState.albumArtImage != nil)
+            .animation(.easeInOut(duration: 1.0), value: playerState.albumArtImage != nil)
+
         case .pixel:
             if let bg = NSImage(named: "pixel_background") {
                 Image(nsImage: bg).interpolation(.none).resizable().scaledToFill()
@@ -102,22 +108,24 @@ struct PlayerContentView: View {
     @EnvironmentObject var themeSettings: ThemeSettings
     let onShowSettings: () -> Void
 
-    // ── Displayed (what the user sees) ────────────────────────────────────
     @State private var displayedTrack: Track
     @State private var displayedImage: NSImage?
 
     // ── Transition state ──────────────────────────────────────────────────
-    @State private var outgoingX: CGFloat   = 0
-    @State private var incomingX: CGFloat   = 0
-    @State private var incomingTrack: Track = .empty
+    @State private var outgoingX: CGFloat = 0
+    @State private var incomingX: CGFloat = 0
+    @State private var incomingTrack: Track  = .empty
     @State private var incomingImage: NSImage? = nil
-    @State private var showIncoming: Bool   = false
+    @State private var showIncoming  = false
 
-    /// 1 = next (current slides left, new arrives from right)
-    /// -1 = previous (current slides right, new arrives from left)
+    /// Set true when a button tap has started the exit animation
+    /// but we haven't yet received the new track data from polling.
+    @State private var isExiting     = false
+
     @State private var pendingDirection: CGFloat = 1
+    @State private var showQueue     = false
 
-    @State private var showQueue = false
+    private let slideWidth: CGFloat = AppleTheme.popoverWidth + 30
 
     init(playerState: PlayerState, onShowSettings: @escaping () -> Void) {
         self.playerState = playerState
@@ -126,15 +134,9 @@ struct PlayerContentView: View {
         _displayedImage = State(initialValue: playerState.albumArtImage)
     }
 
-    // ── Computed ───────────────────────────────────────────────────────────
+    // MARK: - Derived
 
     private var isApple: Bool { themeSettings.active == .apple }
-
-    private var contentWidth: CGFloat {
-        isApple ? AppleTheme.popoverWidth : PixelTheme.popoverWidth
-    }
-
-    private var slideWidth: CGFloat { contentWidth + 40 }
 
     private var nearingEnd: Bool {
         let remaining = displayedTrack.duration - playerState.progress
@@ -142,10 +144,7 @@ struct PlayerContentView: View {
     }
 
     private var targetSpinnerSpeed: Double {
-        guard playerState.isPlaying else { return 0 }
-        // Only freeze spinner during the Apple-theme CD slide; pixel record keeps spinning
-        // because PixelTurntableView manages its own record transition independently.
-        if isApple && showIncoming { return 0 }
+        guard playerState.isPlaying && !isExiting && !showIncoming else { return 0 }
         return nearingEnd ? 0 : 120
     }
 
@@ -153,49 +152,34 @@ struct PlayerContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
-                .padding(.bottom, 2)
-
-            if isApple {
-                // ── Apple theme: CD + info slide together ─────────────────
-                ZStack {
-                    cdAndInfo(track: displayedTrack, image: displayedImage)
-                        .id("out-\(displayedTrack.id)")
-                        .offset(x: outgoingX)
-
-                    if showIncoming {
-                        cdAndInfo(track: incomingTrack, image: incomingImage)
-                            .id("in-\(incomingTrack.id)")
-                            .offset(x: incomingX)
+            // Top bar — always pinned above everything
+            HStack(spacing: 0) {
+                topBarButton("music.note.list") {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        showQueue.toggle()
                     }
                 }
-                .frame(width: contentWidth)
-                .clipped()
-            } else {
-                // ── Pixel theme: turntable handles record slide internally ─
-                PixelTurntableView(
-                    pendingDirection: pendingDirection,
-                    width: PixelTheme.popoverWidth - 10
-                )
-                .padding(.top, 4)
-                .padding(.bottom, 6)
-
-                // Track info slides independently (text only)
-                ZStack {
-                    pixelTrackInfo(track: displayedTrack)
-                        .offset(x: outgoingX)
-
-                    if showIncoming {
-                        pixelTrackInfo(track: incomingTrack)
-                            .offset(x: incomingX)
-                    }
-                }
-                .frame(width: contentWidth)
-                .clipped()
-                .padding(.bottom, 4)
+                Spacer()
+                topBarButton("gearshape") { onShowSettings() }
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+
+            // CD + info — clipped for slide animation
+            ZStack {
+                cdAndInfo(track: displayedTrack, image: displayedImage)
+                    .id("out-\(displayedTrack.id)")
+                    .offset(x: outgoingX)
+
+                if showIncoming {
+                    cdAndInfo(track: incomingTrack, image: incomingImage)
+                        .id("in-\(incomingTrack.id)")
+                        .offset(x: incomingX)
+                }
+            }
+            .frame(width: AppleTheme.popoverWidth)
+            .clipped()
 
             ProgressBarView(playerState: playerState,
                             accentColor: Color(playerState.accentColor),
@@ -203,13 +187,15 @@ struct PlayerContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 6)
 
-            ControlsView(playerState: playerState,
-                         accentColor: Color(playerState.accentColor),
-                         theme: themeSettings.active,
-                         onNextTap: { pendingDirection =  1 },
-                         onPrevTap: { pendingDirection = -1 })
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
+            ControlsView(
+                playerState: playerState,
+                accentColor: Color(playerState.accentColor),
+                theme: themeSettings.active,
+                onNextTap: { beginExit(direction:  1) },
+                onPrevTap: { beginExit(direction: -1) }
+            )
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
 
             if showQueue {
                 Rectangle().fill(Color(white: 1, opacity: 0.1)).frame(height: 1).padding(.horizontal, 10)
@@ -219,17 +205,21 @@ struct PlayerContentView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: showQueue)
-        // ── React to state changes ───────────────────────────────────────
-        .onChange(of: playerState.isPlaying) { _, _ in syncSpinner() }
-        .onChange(of: playerState.progress)  { _, _ in syncSpinner() }
+        .onChange(of: playerState.isPlaying)  { _, _ in syncSpinner() }
+        .onChange(of: playerState.progress)   { _, _ in syncSpinner() }
         .onAppear { syncSpinner() }
         .onChange(of: playerState.currentTrack) { _, newTrack in
             guard newTrack.id != displayedTrack.id else { return }
-            if showIncoming {
+            if isExiting {
+                // Exit already in progress from a button tap — just do the enter phase
+                enterWith(newTrack, image: playerState.albumArtImage)
+            } else if showIncoming {
+                // Mid-transition: update incoming content only
                 incomingTrack = newTrack
                 incomingImage = playerState.albumArtImage
             } else {
-                triggerTransition(to: newTrack, image: playerState.albumArtImage)
+                // Natural track change (song end, external source)
+                fullTransition(to: newTrack, image: playerState.albumArtImage)
             }
         }
         .onChange(of: playerState.albumArtImage) { _, img in
@@ -238,79 +228,37 @@ struct PlayerContentView: View {
         }
     }
 
-    private func syncSpinner() {
-        VinylSpinner.shared.targetDegreesPerSecond = targetSpinnerSpeed
-    }
-
-    // MARK: - Top bar
-
-    private var topBar: some View {
-        HStack(spacing: 0) {
-            if isApple {
-                topBarButton("music.note.list") {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { showQueue.toggle() }
-                }
-                Spacer()
-                topBarButton("gearshape") { onShowSettings() }
-            } else {
-                pixelTopBarButton("pixel_queue", fallback: "music.note.list") {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { showQueue.toggle() }
-                }
-                Spacer()
-                pixelTopBarButton("pixel_settings", fallback: "gearshape") { onShowSettings() }
-            }
-        }
-    }
+    // MARK: - Subviews
 
     private func topBarButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Color(white: 1, opacity: 0.65))
-                .frame(width: 28, height: 28).contentShape(Rectangle())
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
-
-    private func pixelTopBarButton(_ named: String, fallback: String,
-                                   action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            if let img = NSImage(named: named) {
-                let aspect = img.size.width / max(img.size.height, 1)
-                let h: CGFloat = 20
-                Image(nsImage: img)
-                    .interpolation(.none)
-                    .resizable()
-                    .frame(width: h * aspect, height: h)
-            } else {
-                Image(systemName: fallback)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PixelTheme.primaryTextColor)
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(width: 28, height: 28)
-        .contentShape(Rectangle())
-    }
-
-    // MARK: - Subviews
 
     private func cdAndInfo(track: Track, image: NSImage?) -> some View {
         VStack(spacing: 0) {
-            SpinningCDView(image: image, diameter: AppleTheme.cdDiameter)
+            SpinningCDView(image: image,
+                           diameter: AppleTheme.cdDiameter,
+                           theme: themeSettings.active)
                 .padding(.bottom, 14)
 
             VStack(spacing: 3) {
                 MarqueeText(
                     text: track.title,
-                    font: .system(size: 14, weight: .semibold),
+                    font: isApple ? .system(size: 14, weight: .semibold) : PixelTheme.titleFont,
                     color: .white
                 )
                 .textSelection(.enabled)
 
                 MarqueeText(
                     text: track.artist,
-                    font: .system(size: 12),
+                    font: isApple ? .system(size: 12) : PixelTheme.artistFont,
                     color: Color(white: 1, opacity: 0.6)
                 )
                 .textSelection(.enabled)
@@ -318,77 +266,64 @@ struct PlayerContentView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
         }
-        .frame(width: contentWidth)
+        .frame(width: AppleTheme.popoverWidth)
     }
 
-    private func pixelTrackInfo(track: Track) -> some View {
-        VStack(spacing: 3) {
-            MarqueeText(
-                text: track.title,
-                font: PixelTheme.titleFont,
-                color: PixelTheme.primaryTextColor
-            )
-            .textSelection(.enabled)
+    // MARK: - Spinner control
 
-            MarqueeText(
-                text: track.artist,
-                font: PixelTheme.artistFont,
-                color: PixelTheme.secondaryTextColor
-            )
-            .textSelection(.enabled)
-        }
-        .padding(.horizontal, 14)
-        .frame(width: contentWidth)
+    private func syncSpinner() {
+        VinylSpinner.shared.targetDegreesPerSecond = targetSpinnerSpeed
     }
 
     // MARK: - Transition engine
 
-    private func triggerTransition(to newTrack: Track, image: NSImage?) {
-        let dir = pendingDirection
+    /// Called immediately by skip buttons — starts exit animation before new track is known.
+    private func beginExit(direction: CGFloat) {
+        guard !isExiting && !showIncoming else { return }
+        pendingDirection = direction
+        isExiting = true
+        VinylSpinner.shared.targetDegreesPerSecond = 0
+        withAnimation(.easeIn(duration: 0.18)) {
+            outgoingX = -direction * slideWidth
+        }
+        // Force the polling service to detect the track change faster
+        PollingService.shared.refreshNow()
+    }
 
+    /// Enter phase — called when new track data arrives after an exit-first tap.
+    private func enterWith(_ newTrack: Track, image: NSImage?) {
         incomingTrack = newTrack
         incomingImage = image
+        incomingX     = pendingDirection * slideWidth
+        showIncoming  = true
+        isExiting     = false
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) { incomingX = 0 }
+        finalise(after: 0.40)
+    }
 
-        if isApple {
-            // Apple theme: slide the whole CD + info block
-            incomingX    = dir * slideWidth
-            showIncoming = true
+    /// Full transition for natural track changes (no prior exit animation).
+    private func fullTransition(to newTrack: Track, image: NSImage?) {
+        let dir = pendingDirection
+        incomingTrack = newTrack
+        incomingImage = image
+        incomingX     = dir * slideWidth
+        showIncoming  = true
+        VinylSpinner.shared.targetDegreesPerSecond = 0
+        withAnimation(.easeIn(duration: 0.22)) { outgoingX = -dir * slideWidth }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) { incomingX = 0 }
+        }
+        finalise(after: 0.56)
+    }
 
-            VinylSpinner.shared.targetDegreesPerSecond = 0
-
-            withAnimation(.easeIn(duration: 0.28)) { outgoingX = -dir * slideWidth }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                withAnimation(.spring(response: 0.40, dampingFraction: 0.84)) { incomingX = 0 }
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-                displayedTrack   = incomingTrack
-                displayedImage   = incomingImage
-                outgoingX        = 0
-                showIncoming     = false
-                pendingDirection = 1
-                syncSpinner()
-            }
-        } else {
-            // Pixel theme: PixelTurntableView handles the record slide internally.
-            // Only slide the track info text here.
-            incomingX    = dir * slideWidth
-            showIncoming = true
-
-            withAnimation(.easeIn(duration: 0.28)) { outgoingX = -dir * slideWidth }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                withAnimation(.spring(response: 0.40, dampingFraction: 0.84)) { incomingX = 0 }
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-                displayedTrack   = incomingTrack
-                displayedImage   = incomingImage
-                outgoingX        = 0
-                showIncoming     = false
-                pendingDirection = 1
-            }
+    private func finalise(after delay: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            displayedTrack   = incomingTrack
+            displayedImage   = incomingImage
+            outgoingX        = 0
+            showIncoming     = false
+            pendingDirection = 1
+            syncSpinner()
         }
     }
 }

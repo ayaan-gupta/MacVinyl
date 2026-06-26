@@ -10,13 +10,19 @@ import CoreImage
 struct SpinningCDView: View {
     let image: NSImage?
     let diameter: CGFloat
+    let theme: AppTheme
 
     @ObservedObject private var spinner = VinylSpinner.shared
 
     var body: some View {
-        appleCD
-            .rotationEffect(.degrees(spinner.angleDegrees))
-            .frame(width: diameter, height: diameter)
+        Group {
+            switch theme {
+            case .apple: appleCD
+            case .pixel:  pixelCD
+            }
+        }
+        .rotationEffect(.degrees(spinner.angleDegrees))
+        .frame(width: diameter, height: diameter)
     }
 
     private var appleCD: some View {
@@ -39,6 +45,21 @@ struct SpinningCDView: View {
         }
         .clipShape(Circle())
         .shadow(color: .black.opacity(0.55), radius: 18, x: 0, y: 10)
+    }
+
+    private var pixelCD: some View {
+        ZStack {
+            if let img = image {
+                Image(nsImage: img).resizable().scaledToFill()
+                    .frame(width: diameter * 0.62, height: diameter * 0.62).clipShape(Circle())
+            }
+            if let frame = NSImage(named: "pixel_cd_frame") {
+                Image(nsImage: frame).interpolation(.none).resizable()
+                    .frame(width: diameter, height: diameter)
+            } else {
+                Circle().strokeBorder(PixelTheme.accentColor, lineWidth: 5)
+            }
+        }
     }
 }
 

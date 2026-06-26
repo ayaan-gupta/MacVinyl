@@ -5,14 +5,15 @@ struct MarqueeText: View {
     let font: Font
     let color: Color
 
-    @State private var naturalWidth: CGFloat = 0   // full unconstrained text width
+    @State private var naturalWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
     @State private var xOffset: CGFloat = 0
+    @State private var isScrolling = false
     @State private var scrollTask: Task<Void, Never>?
 
-    private let gap: CGFloat = 50
-    private let speed: CGFloat = 40        // points / second
-    private let pause: Double  = 1.8       // seconds before each scroll pass
+    private let gap: CGFloat = 28          // space between repetitions (tighter)
+    private let speed: CGFloat = 42        // points per second
+    private let leadPause: Double = 2.0    // seconds of stillness before each pass
 
     private var needsScroll: Bool {
         naturalWidth > 0 && containerWidth > 0 && naturalWidth > containerWidth
@@ -21,15 +22,10 @@ struct MarqueeText: View {
     var body: some View {
         ZStack(alignment: .leading) {
             if needsScroll {
-                // Two copies side-by-side, animated left
-                HStack(spacing: gap) {
-                    singleLabel
-                    singleLabel
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .offset(x: xOffset)
+                HStack(spacing: gap) { label; label }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .offset(x: xOffset)
             } else {
-                // Fits — center and let the OS truncate normally
                 Text(text)
                     .font(font)
                     .foregroundStyle(color)
@@ -40,17 +36,16 @@ struct MarqueeText: View {
         }
         .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
         .clipped()
-        // ── Measure container width ──────────────────────────────────────
+        // Container width — only used for the overflow check; don't trigger reschedule
         .background(
             GeometryReader { g in
                 Color.clear
-                    .onAppear { containerWidth = g.size.width; reschedule() }
-                    .onChange(of: g.size.width) { _, w in containerWidth = w; reschedule() }
+                    .onAppear { containerWidth = g.size.width }
+                    .onChange(of: g.size.width) { _, w in containerWidth = w }
             }
         )
-        // ── Measure natural (unconstrained) text width ───────────────────
-        // An invisible, fixed-size copy sits in an overlay so its geometry
-        // is always reported regardless of which branch is currently shown.
+        // Natural (unconstrained) text width via invisible overlay
+        // Always present regardless of which branch is active
         .overlay(
             Text(text)
                 .font(font)
@@ -60,42 +55,47 @@ struct MarqueeText: View {
                 .background(
                     GeometryReader { g in
                         Color.clear
-                            .onAppear { naturalWidth = g.size.width; reschedule() }
-                            .onChange(of: g.size.width) { _, w in naturalWidth = w; reschedule() }
+                            .onAppear {
+                                naturalWidth = g.size.width
+                                // Start only if not already scrolling
+                                if !isScrolling { kickoff() }
+                            }
                     }
                 ),
             alignment: .leading
         )
+        .onAppear { kickoff() }
         .onChange(of: text) { _, _ in
-            naturalWidth = 0
+            scrollTask?.cancel()
+            scrollTask = nil
+            isScrolling = false
             xOffset = 0
-            reschedule()
+            naturalWidth = 0
         }
     }
 
-    private var singleLabel: some View {
-        Text(text)
-            .font(font)
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .fixedSize()
+    private var label: some View {
+        Text(text).font(font).foregroundStyle(color).lineLimit(1).fixedSize()
     }
 
-    private func reschedule() {
-        scrollTask?.cancel()
-        xOffset = 0
-        guard needsScroll else { return }
+    private func kickoff() {
+        guard !isScrolling, needsScroll else { return }
+        isScrolling = true
         let dist = naturalWidth + gap
         let dur  = Double(dist) / Double(speed)
         scrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(pause))
+            try? await Task.sleep(for: .seconds(leadPause))
             while !Task.isCancelled {
                 withAnimation(.linear(duration: dur)) { xOffset = -dist }
                 try? await Task.sleep(for: .seconds(dur))
                 guard !Task.isCancelled else { break }
+                // Snap back instantly off-screen (already invisible at -dist)
                 withAnimation(.none) { xOffset = 0 }
-                try? await Task.sleep(for: .seconds(pause))
+                try? await Task.sleep(for: .seconds(0.05))
+                guard !Task.isCancelled else { break }
+                try? await Task.sleep(for: .seconds(leadPause))
             }
+            isScrolling = false
         }
     }
 }

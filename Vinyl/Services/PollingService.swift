@@ -27,6 +27,12 @@ final class PollingService {
         ProgressInterpolator.shared.stop()
     }
 
+    /// Force an immediate full state refresh outside the timer cycle.
+    /// Call this right after a skip command so track detection is near-instant.
+    func refreshNow() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in self?.fetchFullState() }
+    }
+
     private func tick() {
         tickCount += 1
         fetchPosition()

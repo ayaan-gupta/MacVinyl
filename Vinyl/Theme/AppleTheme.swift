@@ -27,4 +27,49 @@ enum AppleTheme {
 
     static let contentPadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 14
+
+    // Window-level Apple backdrop tuning
+    static let backdropBlurRadius: CGFloat = 44
+    static let backdropSaturation: CGFloat = 1.72
+    static let backdropBrightness: CGFloat = 0.06
+    static let backdropContrast: CGFloat = 1.08
+
+    struct BackdropGradientStops {
+        let linear: [NSColor]
+        let glow: NSColor
+    }
+
+    static func backdropGradientColors(from color: NSColor) -> BackdropGradientStops {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+
+        if s < 0.06 {
+            let top = NSColor(white: 0.34, alpha: 1)
+            let mid = NSColor(white: 0.22, alpha: 1)
+            let bottom = NSColor(white: 0.12, alpha: 1)
+            return BackdropGradientStops(linear: [bottom, mid, top], glow: NSColor(white: 0.55, alpha: 1))
+        }
+
+        let top = NSColor(
+            hue: h,
+            saturation: min(s * 1.22, 0.96),
+            brightness: min(max(b * 0.78, 0.58), 0.78)
+        )
+        let mid = NSColor(
+            hue: h,
+            saturation: min(s * 1.05, 0.90),
+            brightness: min(max(b * 0.56, 0.42), 0.58)
+        )
+        let bottom = NSColor(
+            hue: h,
+            saturation: min(s * 0.88, 0.82),
+            brightness: min(max(b * 0.38, 0.26), 0.42)
+        )
+        let glow = NSColor(
+            hue: h,
+            saturation: min(s * 1.15, 0.94),
+            brightness: min(max(b * 0.92, 0.72), 0.92)
+        )
+        return BackdropGradientStops(linear: [bottom, mid, top], glow: glow)
+    }
 }

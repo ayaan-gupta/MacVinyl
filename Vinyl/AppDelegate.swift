@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.35
                     context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    context.allowsImplicitAnimation = true
+                    context.allowsImplicitAnimation = false
                     pop.contentSize = newSize
                     pop.contentViewController?.view.layoutSubtreeIfNeeded()
                 }

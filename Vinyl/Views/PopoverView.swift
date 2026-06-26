@@ -48,50 +48,66 @@ struct PopoverView: View {
     @State private var showSettings = false
     @State private var showQueue = false
     @State private var pixelHeights = PixelPopoverHeights()
+    @State private var queueResizeInProgress = false
 
     private var contentWidth: CGFloat {
         themeSettings.active == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
     }
 
     var body: some View {
-        Group {
-            if showSettings {
-                SettingsView(playerState: playerState,
-                             onDismiss: { withAnimation { showSettings = false } })
-                    .environmentObject(themeSettings)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.asymmetric(insertion: .move(edge: .trailing),
-                                            removal:   .move(edge: .trailing)))
-            } else {
-                PlayerContentView(
-                    playerState: playerState,
-                    showQueue: $showQueue,
-                    onShowSettings: { withAnimation { showSettings = true } }
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                if themeSettings.active != .apple {
+                    BackgroundView(
+                        playerState: playerState,
+                        theme: themeSettings.active,
+                        isSettings: showSettings,
+                        pixelHeights: pixelHeights,
+                        containerWidth: geo.size.width,
+                        containerHeight: geo.size.height
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                }
+
+                Group {
+                    if showSettings {
+                        SettingsView(playerState: playerState,
+                                     onDismiss: { withAnimation { showSettings = false } })
+                            .environmentObject(themeSettings)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.asymmetric(insertion: .move(edge: .trailing),
+                                                    removal:   .move(edge: .trailing)))
+                    } else {
+                        PlayerContentView(
+                            playerState: playerState,
+                            showQueue: $showQueue,
+                            onShowSettings: { withAnimation { showSettings = true } }
+                        )
+                        .environmentObject(themeSettings)
+                        .transition(.asymmetric(insertion: .move(edge: .leading),
+                                                removal:   .move(edge: .leading)))
+                    }
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
+                .frame(width: contentWidth, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+        }
+        .frame(width: contentWidth)
+        .background {
+            if themeSettings.active == .apple {
+                ApplePopoverWindowBackdrop(
+                    accent: playerState.accentColor,
+                    image: playerState.albumArtImage
                 )
-                .environmentObject(themeSettings)
-                .transition(.asymmetric(insertion: .move(edge: .leading),
-                                        removal:   .move(edge: .leading)))
+                .frame(width: 0, height: 0)
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
-        .frame(width: contentWidth)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(
-            BackgroundView(
-                playerState: playerState,
-                theme: themeSettings.active,
-                isSettings: showSettings,
-                pixelHeights: pixelHeights
-            )
-        )
         .background(PopoverChromeHider().frame(width: 0, height: 0))
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
-            }
-        )
         .onPreferenceChange(PixelPopoverHeightsKey.self) { pixelHeights = $0 }
         .onPreferenceChange(SizePreferenceKey.self) { size in
+            guard !queueResizeInProgress else { return }
             onSizeChange?(size, false)
         }
         .onChange(of: showQueue) { _, open in
@@ -104,7 +120,11 @@ struct PopoverView: View {
                 ? pixelHeights.expanded
                 : collapsed + PixelTheme.estimatedQueueSectionHeight
             let target = open ? expanded : collapsed
+            queueResizeInProgress = true
             onSizeChange?(CGSize(width: contentWidth, height: target), true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                queueResizeInProgress = false
+            }
         }
         .onChange(of: showSettings) { _, _ in
             onSizeChange?(CGSize(width: contentWidth, height: 1), false)
@@ -119,105 +139,40 @@ private struct BackgroundView: View {
     let theme: AppTheme
     var isSettings: Bool = false
     var pixelHeights: PixelPopoverHeights = PixelPopoverHeights()
+    var containerWidth: CGFloat = 0
+    var containerHeight: CGFloat = 0
 
     var body: some View {
         switch theme {
         case .apple:
-            AppleAlbumBackground(
-                accent: playerState.accentColor,
-                image: playerState.albumArtImage
-            )
+            EmptyView()
 
         case .pixel:
             if isSettings {
                 Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
             } else if let bg = NSImage(named: "pixel_background") {
-                GeometryReader { geo in
-                    let width = geo.size.width
-                    let collapsed = pixelHeights.collapsed > 0 ? pixelHeights.collapsed : geo.size.height
-                    // Image is always drawn at the queue-open height; the window clips the bottom when closed.
-                    let expanded = pixelHeights.expanded > 0
-                        ? pixelHeights.expanded
-                        : collapsed + PixelTheme.estimatedQueueSectionHeight
+                let width = containerWidth > 0 ? containerWidth : PixelTheme.popoverWidth
+                let collapsed = pixelHeights.collapsed > 0 ? pixelHeights.collapsed : containerHeight
+                let expanded = pixelHeights.expanded > 0
+                    ? pixelHeights.expanded
+                    : collapsed + PixelTheme.estimatedQueueSectionHeight
+                let clipHeight = containerHeight > 0 ? containerHeight : collapsed
 
+                ZStack(alignment: .top) {
                     Image(nsImage: bg)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFill()
                         .frame(width: width, height: expanded)
-                        .frame(width: width, height: geo.size.height, alignment: .top)
                         .clipped()
                 }
+                .frame(width: width, height: clipHeight, alignment: .top)
+                .clipped()
+                .transaction { $0.animation = nil }
             } else {
                 Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
             }
         }
-    }
-}
-
-/// Vibrant Apple Music–style backdrop: blurred album art + accent gradient.
-/// Uniform scrim (not a darker top band) keeps the header seamless.
-private struct AppleAlbumBackground: View {
-    let accent: NSColor
-    let image: NSImage?
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-
-            ZStack {
-                Color.black
-
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: w, height: h)
-                        .clipped()
-                        .blur(radius: 56, opaque: true)
-                        .saturation(1.3)
-                }
-
-                LinearGradient(
-                    colors: Self.gradientColors(from: accent),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .opacity(image != nil ? 0.48 : 0.72)
-
-                Color.black.opacity(0.30)
-            }
-            .frame(width: w, height: h)
-        }
-        .animation(.easeInOut(duration: 0.9), value: image != nil)
-        .animation(.easeInOut(duration: 1.1), value: accent.description)
-    }
-
-    static func gradientColors(from color: NSColor) -> [Color] {
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        color.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-
-        if s < 0.06 {
-            return [Color(white: 0.28), Color(white: 0.16), Color(white: 0.10)]
-        }
-
-        let top = Color(
-            hue: h,
-            saturation: min(s * 1.08, 0.90),
-            brightness: min(max(b * 0.58, 0.42), 0.58)
-        )
-        let mid = Color(
-            hue: h,
-            saturation: min(s * 0.92, 0.78),
-            brightness: min(max(b * 0.42, 0.30), 0.44)
-        )
-        let bottom = Color(
-            hue: h,
-            saturation: min(s * 0.78, 0.65),
-            brightness: min(max(b * 0.28, 0.18), 0.32)
-        )
-        return [top, mid, bottom]
     }
 }
 
@@ -304,7 +259,7 @@ struct PlayerContentView: View {
                 if showQueue {
                     Rectangle().fill(Color(white: 1, opacity: 0.1)).frame(height: 1).padding(.horizontal, 10)
                     QueueView(playerState: playerState, theme: themeSettings.active)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                         .padding(.bottom, 6)
                 }
             }
@@ -325,6 +280,7 @@ struct PlayerContentView: View {
                     .onChange(of: geo.size.height) { _, height in
                         recordPopoverHeight(height)
                     }
+                    .preference(key: SizePreferenceKey.self, value: geo.size)
                     .preference(
                         key: PixelPopoverHeightsKey.self,
                         value: PixelPopoverHeights(
@@ -428,7 +384,7 @@ struct PlayerContentView: View {
     }
 
     private func toggleQueue() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+        withAnimation(.easeInOut(duration: 0.35)) {
             showQueue.toggle()
         }
     }

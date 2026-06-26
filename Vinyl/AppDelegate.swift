@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Carbon
 import Combine
+import CoreText
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -14,11 +15,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        registerBundleFonts()
         setupMenuBar()
         setupPopover()
         setupOAuthHandler()
         setupWakeObserver()
         startServices()
+    }
+
+    // MARK: - Fonts
+
+    private func registerBundleFonts() {
+        guard let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) else { return }
+        for url in urls {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
     }
 
     // MARK: - Menu Bar

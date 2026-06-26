@@ -9,10 +9,10 @@ enum PixelTheme {
     static let contentPadding: CGFloat = 14
     static let sectionSpacing: CGFloat = 12
 
-    static let titleFont: Font = Font.custom("Silkscreen-Regular", size: 11).weight(.bold)
-    static let artistFont: Font = Font.custom("Silkscreen-Regular", size: 10)
-    static let timestampFont: Font = Font.custom("Silkscreen-Regular", size: 9)
-    static let queueRowFont: Font = Font.custom("Silkscreen-Regular", size: 9)
+    static let titleFont: Font = Font.custom("PixelifySans-Regular", size: 12).weight(.bold)
+    static let artistFont: Font = Font.custom("PixelifySans-Regular", size: 11)
+    static let timestampFont: Font = Font.custom("PixelifySans-Regular", size: 10)
+    static let queueRowFont: Font = Font.custom("PixelifySans-Regular", size: 10)
 
     static let primaryTextColor: Color = Color(red: 0.95, green: 0.88, blue: 0.72, alpha: 1)
     static let secondaryTextColor: Color = Color(red: 0.72, green: 0.65, blue: 0.50, alpha: 1)

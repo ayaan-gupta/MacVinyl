@@ -2,7 +2,19 @@ import SwiftUI
 
 struct QueueView: View {
     let queue: [Track]
+    let authState: PlayerState.AuthState
     let theme: AppTheme
+
+    private var emptyMessage: String {
+        switch authState {
+        case .authenticated:
+            return "Queue empty — play something in Spotify to see Up Next"
+        case .needsReauth:
+            return "Reconnect Spotify in Settings to see Up Next"
+        case .unauthenticated:
+            return "Connect Spotify in Settings to see Up Next"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,7 +30,7 @@ struct QueueView: View {
                 .padding(.bottom, 6)
 
             if queue.isEmpty {
-                Text("Queue empty — connect Spotify to see Up Next")
+                Text(emptyMessage)
                     .font(theme == .apple ? .system(size: 11) : PixelTheme.timestampFont)
                     .foregroundStyle(theme == .apple
                                      ? Color(white: 1, opacity: 0.35)

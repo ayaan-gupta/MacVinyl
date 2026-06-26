@@ -26,8 +26,11 @@ enum PixelTheme {
     static let playButtonSize: CGFloat = 52
     static let topBarIconHeight: CGFloat = 22
 
-    /// Fallback until the queue-open layout height is measured once.
-    static let estimatedQueueSectionHeight: CGFloat = 56
+    /// Vertical space reserved for the floated queue/settings icons above the turntable.
+    static let topBarClearance: CGFloat = 38
+
+    /// Fallback queue strip height until the open layout is measured once.
+    static let estimatedQueueSectionHeight: CGFloat = 58
 }
 
 extension Color {

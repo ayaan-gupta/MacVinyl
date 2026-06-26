@@ -6,6 +6,10 @@ struct SettingsView: View {
     @ObservedObject private var hotkeyConfig = HotkeyConfig.shared
     var onDismiss: () -> Void
 
+    private var contentWidth: CGFloat {
+        themeSettings.active == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -81,11 +85,16 @@ struct SettingsView: View {
                                 Text("Connected").font(.footnote)
                                 Spacer()
                                 Button("Disconnect") {
-                                    Keychain.delete(forKey: "spotify_access_token")
-                                    Keychain.delete(forKey: "spotify_refresh_token")
-                                    playerState.authState = .unauthenticated
+                                    SpotifyWebAPI.shared.signOut()
                                 }
                                 .font(.footnote).foregroundStyle(.red).buttonStyle(.plain)
+                            }
+                        } else if playerState.authState == .needsReauth {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Session expired — reconnect to restore queue and album art.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                Button("Reconnect to Spotify") { SpotifyWebAPI.shared.startOAuthFlow() }
+                                    .buttonStyle(.borderedProminent).controlSize(.small)
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 6) {
@@ -101,7 +110,9 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(width: AppleTheme.popoverWidth)
+        .frame(width: contentWidth)
+        .frame(minHeight: 420)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func sectionHeader(_ title: String, icon: String) -> some View {

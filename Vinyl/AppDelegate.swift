@@ -62,14 +62,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
 
-        let rootView = PopoverView(playerState: playerState, onSizeChange: { [weak self] size in
+        let rootView = PopoverView(playerState: playerState, onSizeChange: { [weak self] size, animated in
             guard let self, let pop = self.popover else { return }
-            guard size.height > 10 else { return }  // ignore the height:1 reset frame
-            pop.contentSize = size
+            guard size.height > 10 else { return }
+            let newSize = NSSize(width: size.width, height: size.height)
+            if animated {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.35
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    context.allowsImplicitAnimation = true
+                    pop.contentSize = newSize
+                    pop.contentViewController?.view.layoutSubtreeIfNeeded()
+                }
+            } else {
+                pop.contentSize = newSize
+            }
         })
         .environmentObject(themeSettings)
 
         let vc = NSHostingController(rootView: rootView)
+        vc.view.wantsLayer = true
+        vc.view.layer?.backgroundColor = NSColor.clear.cgColor
         vc.view.setFrameSize(NSSize(width: AppleTheme.popoverWidth, height: 400))
         popover.contentViewController = vc
         popover.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 400)
@@ -120,6 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SpotifyWebAPI.shared.handleCallback(url: url)
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "vinyl" {
+            SpotifyWebAPI.shared.handleCallback(url: url)
+        }
+    }
+
     // MARK: - Wake
 
     private func setupWakeObserver() {
@@ -139,7 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startServices() {
         if SpotifyWebAPI.shared.isAuthenticated {
-            playerState.authState = .authenticated
+            SpotifyWebAPI.shared.validateSession { success in
+                if success { PollingService.shared.refreshNow() }
+            }
         }
         VinylSpinner.shared.start()
         PollingService.shared.start()

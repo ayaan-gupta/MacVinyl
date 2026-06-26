@@ -24,7 +24,7 @@ enum PixelTurntableLayout {
 
     /// Number of visible pixel blocks across the album-art width.
     /// Lower = chunkier / more pixelated. Higher = sharper / less pixelated. Try 12–48.
-    static var artPixelCount: Double = 38
+    static var artPixelCount: Double = 35
 
     // MARK: Tonearm size
 

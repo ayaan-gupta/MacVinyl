@@ -64,6 +64,9 @@ final class PollingService {
         tickCount += 1
         fetchPosition()
         if tickCount % 3 == 0 { fetchFullState() }
+        if tickCount % 20 == 0, SpotifyWebAPI.shared.isAuthenticated {
+            refreshQueueFromAPI(fallbackTrackKey: lastTrackKey, trackChanged: false)
+        }
     }
 
     private func fetchPosition() {
@@ -107,40 +110,45 @@ final class PollingService {
                 state.currentTrack = updated
             }
 
-            guard trackChanged else { return }
-            state.progress = 0
+            if trackChanged {
+                state.progress = 0
 
-            if let artURL = info.artworkURL {
-                if let cached = AlbumArtLoader.shared.image(for: artURL) {
-                    state.albumArtTrackID = key
-                    state.albumArtImage = cached
+                if let artURL = info.artworkURL {
+                    if let cached = AlbumArtLoader.shared.image(for: artURL) {
+                        state.albumArtTrackID = key
+                        state.albumArtImage = cached
+                    }
+                    AlbumArtLoader.shared.load(trackID: key, url: artURL)
                 }
-                AlbumArtLoader.shared.load(trackID: key, url: artURL)
             }
 
             if SpotifyWebAPI.shared.isAuthenticated {
-                SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
-                    if let track {
-                        let merged = Track(
-                            id: key,
-                            title: track.title,
-                            artist: track.artist,
-                            albumArtURL: track.albumArtURL ?? state.currentTrack.albumArtURL,
-                            duration: track.duration
-                        )
-                        if state.currentTrack != merged { state.currentTrack = merged }
-                    }
-                    if let artURL {
-                        AlbumArtLoader.shared.load(trackID: key, url: artURL)
-                    }
-                    let queueID = track?.id ?? key
-                    self.scheduleQueueFetch(for: queueID)
-                }
+                self.refreshQueueFromAPI(fallbackTrackKey: key, trackChanged: trackChanged)
             }
         }
     }
 
-    private func scheduleQueueFetch(for trackID: String) {
+    private func refreshQueueFromAPI(fallbackTrackKey: String, trackChanged: Bool) {
+        SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
+            let state = PlayerState.shared
+            if trackChanged, let track {
+                let merged = Track(
+                    id: fallbackTrackKey,
+                    title: track.title,
+                    artist: track.artist,
+                    albumArtURL: track.albumArtURL ?? state.currentTrack.albumArtURL,
+                    duration: track.duration
+                )
+                if state.currentTrack != merged { state.currentTrack = merged }
+            }
+            if let artURL {
+                AlbumArtLoader.shared.load(trackID: fallbackTrackKey, url: artURL)
+            }
+            self.scheduleQueueFetch(for: track?.id)
+        }
+    }
+
+    private func scheduleQueueFetch(for trackID: String?) {
         pendingQueueFetch?.cancel()
         let item = DispatchWorkItem {
             SpotifyWebAPI.shared.fetchQueue(expectedTrackID: trackID) { tracks in

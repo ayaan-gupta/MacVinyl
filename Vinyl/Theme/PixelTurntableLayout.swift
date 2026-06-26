@@ -53,10 +53,10 @@ enum PixelTurntableLayout {
 
     /// Arm angle when paused (off the record).
     /// Increase to rotate clockwise; decrease for counter-clockwise.
-    static var angleOff: Double = 8
+    static var angleOff: Double = 5
 
     /// Arm angle when playing (on the record).
-    static var angleOn: Double = 40
+    static var angleOn: Double = 37
 
     // MARK: Tonearm wiggle (while playing)
 

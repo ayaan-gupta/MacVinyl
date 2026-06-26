@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vc.view.setFrameSize(NSSize(width: AppleTheme.popoverWidth, height: 400))
         popover.contentViewController = vc
         popover.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 400)
+        vc.view.layoutSubtreeIfNeeded()
     }
 
     @objc private func togglePopover() {
@@ -81,13 +82,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            // The status bar button's window uses a flipped coordinate system.
-            // .maxY = bottom edge of the button = below the menu bar (correct).
-            // Activating first ensures the button's window is key so coordinate
-            // transforms are accurate on the very first click.
-            NSApp.activate(ignoringOtherApps: false)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover(from: button)
+        }
+    }
+
+    private func showPopover(from button: NSStatusBarButton) {
+        NSApp.activate(ignoringOtherApps: true)
+
+        // The status item window may not have finished layout on the first click
+        // after launch; defer one run loop so bounds and isFlipped are reliable.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let button = self.statusItem.button, !self.popover.isShown else { return }
+
+            button.window?.layoutIfNeeded()
+            button.layoutSubtreeIfNeeded()
+
+            // Flipped status bar buttons anchor below on .maxY; standard coords use .minY.
+            let edge: NSRectEdge = button.isFlipped ? .maxY : .minY
+            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: edge)
+            self.popover.contentViewController?.view.window?.makeKey()
         }
     }
 

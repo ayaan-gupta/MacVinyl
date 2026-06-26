@@ -22,8 +22,9 @@ enum PixelTheme {
     static let accentColor: Color = Color(red: 0.56, green: 0.78, blue: 0.40, alpha: 1)
     static let rowBackgroundColor: Color = Color(red: 0.20, green: 0.16, blue: 0.10, alpha: 0.6)
 
-    static let controlButtonSize: CGFloat = 24
-    static let playButtonSize: CGFloat = 30
+    static let controlButtonSize: CGFloat = 40
+    static let playButtonSize: CGFloat = 52
+    static let topBarIconHeight: CGFloat = 22
 }
 
 extension Color {

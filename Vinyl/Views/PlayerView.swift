@@ -10,19 +10,13 @@ import CoreImage
 struct SpinningCDView: View {
     let image: NSImage?
     let diameter: CGFloat
-    let theme: AppTheme
 
     @ObservedObject private var spinner = VinylSpinner.shared
 
     var body: some View {
-        Group {
-            switch theme {
-            case .apple: appleCD
-            case .pixel:  pixelCD
-            }
-        }
-        .rotationEffect(.degrees(spinner.angleDegrees))
-        .frame(width: diameter, height: diameter)
+        appleCD
+            .rotationEffect(.degrees(spinner.angleDegrees))
+            .frame(width: diameter, height: diameter)
     }
 
     private var appleCD: some View {
@@ -45,21 +39,6 @@ struct SpinningCDView: View {
         }
         .clipShape(Circle())
         .shadow(color: .black.opacity(0.55), radius: 18, x: 0, y: 10)
-    }
-
-    private var pixelCD: some View {
-        ZStack {
-            if let img = image {
-                Image(nsImage: img).resizable().scaledToFill()
-                    .frame(width: diameter * 0.62, height: diameter * 0.62).clipShape(Circle())
-            }
-            if let frame = NSImage(named: "pixel_cd_frame") {
-                Image(nsImage: frame).interpolation(.none).resizable()
-                    .frame(width: diameter, height: diameter)
-            } else {
-                Circle().strokeBorder(PixelTheme.accentColor, lineWidth: 5)
-            }
-        }
     }
 }
 
@@ -84,34 +63,13 @@ struct PixelTurntableView: View {
     @State private var lastTrackID:     String  = ""
 
     // ── Tonearm state ──────────────────────────────────────────────────────
-    @State private var tonearmDegrees: Double = TonearmAngles.off
+    @State private var tonearmDegrees: Double = PixelTurntableLayout.angleOff
 
-    // FINE-TUNE: adjust these angles to match your pixel art exactly.
-    // Positive = clockwise (arm rests to the right of the record).
-    // Negative = counterclockwise (arm swings left, onto the record).
-    private enum TonearmAngles {
-        static let on:  Double = -42   // arm on record (playing)
-        static let off: Double = -12   // arm resting (paused)
-    }
-
-    // ── Layout geometry ────────────────────────────────────────────────────
-    // FINE-TUNE: adjust these fractions to match your pixel_turntable.png layout.
-    private var ttHeight:   CGFloat { width * (659.0 / 869.0) }   // turntable aspect ratio
-    private var recordDiam: CGFloat { width * 0.57 }              // record diameter
-    private var artDiam:    CGFloat { recordDiam * 0.37 }         // album-art hole diameter
-    private var tonearmH:   CGFloat { ttHeight * 0.65 }           // tonearm display height
-    private var tonearmW:   CGFloat { tonearmH * (169.0 / 566.0) } // keep aspect ratio
-
-    // Tonearm pivot position relative to ZStack center (= turntable center).
-    // FINE-TUNE: move these until the pivot dot aligns with the physical pivot
-    // in pixel_turntable.png.
-    private var pivotX: CGFloat { width * 0.31 }
-    private var pivotY: CGFloat { -ttHeight * 0.33 }
-
-    // Record center offset from turntable center.
-    // FINE-TUNE: adjust until record sits cleanly on the platter.
-    private var recordOffX: CGFloat { -width * 0.04 }
-    private var recordOffY: CGFloat {  ttHeight * 0.01 }
+    private var ttHeight: CGFloat { PixelTurntableLayout.turntableHeight(forWidth: width) }
+    private var recordDiam: CGFloat { PixelTurntableLayout.recordDiameter(forWidth: width) }
+    private var artDiam: CGFloat { recordDiam * PixelTurntableLayout.artHoleScale }
+    private var recordOffX: CGFloat { PixelTurntableLayout.recordOffsetX(forWidth: width) }
+    private var recordOffY: CGFloat { PixelTurntableLayout.recordOffsetY(forHeight: ttHeight) }
 
     // ── Body ───────────────────────────────────────────────────────────────
 
@@ -141,12 +99,16 @@ struct PixelTurntableView: View {
         .onAppear {
             displayedArt   = playerState.albumArtImage
             lastTrackID    = playerState.currentTrack.id
-            tonearmDegrees = playerState.isPlaying ? TonearmAngles.on : TonearmAngles.off
+            tonearmDegrees = playerState.isPlaying
+                ? PixelTurntableLayout.angleOn
+                : PixelTurntableLayout.angleOff
         }
         // Tonearm follows play/pause state
         .onChange(of: playerState.isPlaying) { _, playing in
             withAnimation(.easeInOut(duration: 0.7)) {
-                tonearmDegrees = playing ? TonearmAngles.on : TonearmAngles.off
+                tonearmDegrees = playing
+                    ? PixelTurntableLayout.angleOn
+                    : PixelTurntableLayout.angleOff
             }
         }
         // New track → slide record out, new one in
@@ -212,16 +174,23 @@ struct PixelTurntableView: View {
     @ViewBuilder
     private var tonearmView: some View {
         if let ta = NSImage(named: "pixel_tonearm") {
+            let size = PixelTurntableLayout.tonearmSize(forHeight: ttHeight)
+            let offset = PixelTurntableLayout.tonearmOffset(
+                tonearmWidth: size.width,
+                tonearmHeight: size.height,
+                turntableWidth: width,
+                turntableHeight: ttHeight
+            )
+
             Image(nsImage: ta)
                 .interpolation(.none)
                 .resizable()
-                .frame(width: tonearmW, height: tonearmH)
-                // Rotate around the top-centre of the image (the physical pivot)
-                .rotationEffect(.degrees(tonearmDegrees), anchor: .top)
-                // offset so the pivot (top of image) lands at (pivotX, pivotY)
-                // In a ZStack the child's centre is at (0,0), so pivot top = (0, -tonearmH/2).
-                // We shift by (pivotX, pivotY + tonearmH/2) to land the top at the target.
-                .offset(x: pivotX, y: pivotY + tonearmH / 2)
+                .frame(width: size.width, height: size.height)
+                .rotationEffect(
+                    .degrees(tonearmDegrees),
+                    anchor: PixelTurntableLayout.tonearmPivotAnchor
+                )
+                .offset(x: offset.x, y: offset.y)
         }
     }
 
@@ -293,7 +262,7 @@ struct ProgressBarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: theme == .pixel ? 3 : 6) {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color(white: 1, opacity: 0.2)).frame(height: 4)
                 if barWidth > 0 {
@@ -384,15 +353,17 @@ struct ControlsView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointingHandCursor()
     }
 
     private var pixelControls: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 28) {
             pixelButton("pixel_backwards", fallback: "backward.fill",
                         height: PixelTheme.controlButtonSize) {
                 onPrevTap(); AppleScriptBridge.previousTrack()
             }
-            pixelButton(playerState.isPlaying ? "pixel_paused" : "pixel_playing",
+            // Asset filenames are inverted: playing.png = pause, paused.png = play.
+            pixelButton(playerState.isPlaying ? "pixel_playing" : "pixel_paused",
                         fallback: playerState.isPlaying ? "pause.fill" : "play.fill",
                         height: PixelTheme.playButtonSize) {
                 PlayerState.shared.isPlaying.toggle()
@@ -423,5 +394,7 @@ struct ControlsView: View {
             }
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .pointingHandCursor()
     }
 }

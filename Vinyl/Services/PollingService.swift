@@ -78,7 +78,6 @@ final class PollingService {
 
                 guard trackChanged else { return }
                 state.progress = 0
-                state.albumArtImage = nil
 
                 // Use AppleScript artwork URL directly — no Spotify auth needed
                 if let artURL = info.artworkURL {

@@ -56,22 +56,38 @@ private struct QueueResponse: Decodable {
 final class SpotifyWebAPI: ObservableObject {
     static let shared = SpotifyWebAPI()
 
+    private var cachedAccessToken: String?
+    private var cachedRefreshToken: String?
+
     private var accessToken: String? {
-        get { Keychain.load(forKey: "spotify_access_token") }
-        set { if let v = newValue { Keychain.save(v, forKey: "spotify_access_token") } else { Keychain.delete(forKey: "spotify_access_token") } }
+        get { cachedAccessToken }
+        set {
+            cachedAccessToken = newValue
+            if let v = newValue { Keychain.save(v, forKey: "spotify_access_token") }
+            else { Keychain.delete(forKey: "spotify_access_token") }
+        }
     }
 
     private var refreshToken: String? {
-        get { Keychain.load(forKey: "spotify_refresh_token") }
-        set { if let v = newValue { Keychain.save(v, forKey: "spotify_refresh_token") } else { Keychain.delete(forKey: "spotify_refresh_token") } }
+        get { cachedRefreshToken }
+        set {
+            cachedRefreshToken = newValue
+            if let v = newValue { Keychain.save(v, forKey: "spotify_refresh_token") }
+            else { Keychain.delete(forKey: "spotify_refresh_token") }
+        }
     }
 
     private var tokenExpiresAt: Date = .distantPast
     private var proactiveRefreshTask: DispatchWorkItem?
 
-    var isAuthenticated: Bool { accessToken != nil && refreshToken != nil }
+    var isAuthenticated: Bool { cachedAccessToken != nil && cachedRefreshToken != nil }
 
     private init() {
+        cachedAccessToken = Keychain.load(forKey: "spotify_access_token")
+        cachedRefreshToken = Keychain.load(forKey: "spotify_refresh_token")
+        // Re-save with accessibility attributes so macOS stops prompting on every read.
+        if let token = cachedAccessToken { Keychain.save(token, forKey: "spotify_access_token") }
+        if let token = cachedRefreshToken { Keychain.save(token, forKey: "spotify_refresh_token") }
         if let storedExpiry = UserDefaults.standard.object(forKey: "spotify_token_expiry") as? Date {
             tokenExpiresAt = storedExpiry
         }

@@ -57,6 +57,8 @@ struct PixelTurntableView: View {
     // ── Record transition state ────────────────────────────────────────────
     @State private var displayedArt:    NSImage?
     @State private var incomingArt:     NSImage?
+    @State private var pixelatedDisplayedArt: NSImage?
+    @State private var pixelatedIncomingArt: NSImage?
     @State private var outgoingOffsetX: CGFloat = 0
     @State private var incomingOffsetX: CGFloat = 0
     @State private var showIncoming:    Bool    = false
@@ -80,11 +82,11 @@ struct PixelTurntableView: View {
 
             // Layer 2 — Spinning record with album art (clips to circular platter)
             ZStack {
-                recordView(art: displayedArt, spinning: true)
+                recordView(art: pixelatedDisplayedArt, spinning: true)
                     .offset(x: outgoingOffsetX)
 
                 if showIncoming {
-                    recordView(art: incomingArt, spinning: false)
+                    recordView(art: pixelatedIncomingArt, spinning: false)
                         .offset(x: incomingOffsetX)
                 }
             }
@@ -102,6 +104,7 @@ struct PixelTurntableView: View {
             tonearmDegrees = playerState.isPlaying
                 ? PixelTurntableLayout.angleOn
                 : PixelTurntableLayout.angleOff
+            pixelateArt(displayedArt) { pixelatedDisplayedArt = $0 }
         }
         // Tonearm follows play/pause state
         .onChange(of: playerState.isPlaying) { _, playing in
@@ -121,9 +124,18 @@ struct PixelTurntableView: View {
         .onChange(of: playerState.albumArtImage) { _, newArt in
             if showIncoming {
                 incomingArt = newArt
+                pixelateArt(newArt) { pixelatedIncomingArt = $0 }
             } else {
                 displayedArt = newArt
+                pixelateArt(newArt) { pixelatedDisplayedArt = $0 }
             }
+        }
+        .onChange(of: incomingArt) { _, newArt in
+            pixelateArt(newArt) { pixelatedIncomingArt = $0 }
+        }
+        .onChange(of: displayedArt) { _, newArt in
+            guard !showIncoming else { return }
+            pixelateArt(newArt) { pixelatedDisplayedArt = $0 }
         }
     }
 
@@ -148,7 +160,7 @@ struct PixelTurntableView: View {
         ZStack {
             // Album art in the transparent center hole (pixelated)
             if let art = art {
-                Image(nsImage: pixelateArt(art))
+                Image(nsImage: art)
                     .interpolation(.none)
                     .resizable()
                     .scaledToFill()
@@ -216,16 +228,26 @@ struct PixelTurntableView: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.68) {
             displayedArt    = newArt
+            pixelatedDisplayedArt = pixelatedIncomingArt
             outgoingOffsetX = 0
             showIncoming    = false
         }
     }
 
-    // MARK: - Album art pixelation
+    private func pixelateArt(_ image: NSImage?, completion: @escaping (NSImage?) -> Void) {
+        guard let image else {
+            completion(nil)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Self.makePixelatedArt(image)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
 
     /// Applies a CIPixellate filter so the art looks appropriately 8-bit inside the
-    /// record hole while remaining recognisable. Adjust `targetPixelCount` to taste.
-    private func pixelateArt(_ image: NSImage) -> NSImage {
+    /// record hole while remaining recognisable.
+    private static func makePixelatedArt(_ image: NSImage) -> NSImage {
         guard let cgSrc = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return image
         }

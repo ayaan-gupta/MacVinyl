@@ -7,15 +7,15 @@ enum PixelTurntableLayout {
     // MARK: Record
 
     /// Record diameter as a fraction of turntable width. Increase to make the vinyl bigger.
-    static var recordDiameterScale: CGFloat = 0.60
+    static var recordDiameterScale: CGFloat = 0.6175
 
     /// Horizontal nudge from turntable center, as a fraction of turntable width.
     /// Negative = left, positive = right.
-    static var recordOffsetXFraction: CGFloat = -0.04
+    static var recordOffsetXFraction: CGFloat = -0.10
 
     /// Vertical nudge from turntable center, as a fraction of turntable height.
     /// Negative = up, positive = down.
-    static var recordOffsetYFraction: CGFloat = -0.03
+    static var recordOffsetYFraction: CGFloat = -0.01025
 
     /// Album-art hole size as a fraction of record diameter.
     static var artHoleScale: CGFloat = 0.36
@@ -29,11 +29,11 @@ enum PixelTurntableLayout {
 
     /// Pivot X from turntable center, as a fraction of turntable width.
     /// Positive = right of center.
-    static var pivotXFraction: CGFloat = 0.30
+    static var pivotXFraction: CGFloat = 0.32
 
     /// Pivot Y from turntable center, as a fraction of turntable height.
     /// Negative = above center, positive = below center.
-    static var pivotYFraction: CGFloat = -0.30
+    static var pivotYFraction: CGFloat = -0.285
 
     // MARK: Tonearm pivot anchor (on the tonearm image)
 
@@ -41,16 +41,16 @@ enum PixelTurntableLayout {
     static var tonearmPivotAnchorX: CGFloat = 0.5
 
     /// Vertical pivot point on the tonearm PNG (0 = top, 1 = bottom).
-    static var tonearmPivotAnchorY: CGFloat = 0.0
+    static var tonearmPivotAnchorY: CGFloat = 0.2175
 
     // MARK: Tonearm rotation (degrees)
 
     /// Arm angle when paused (off the record).
     /// Increase to rotate clockwise; decrease for counter-clockwise.
-    static var angleOff: Double = 12
+    static var angleOff: Double = 0
 
     /// Arm angle when playing (on the record).
-    static var angleOn: Double = -24
+    static var angleOn: Double = 30
 
     // MARK: Derived helpers (used by PixelTurntableView)
 

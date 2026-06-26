@@ -191,13 +191,14 @@ struct PlayerContentView: View {
         .onAppear { syncSpinner() }
         .onChange(of: playerState.currentTrack) { _, newTrack in
             guard newTrack.id != displayedTrack.id else { return }
+            let art = playerState.albumArtImage ?? displayedImage
             if isExiting {
-                enterWith(newTrack, image: playerState.albumArtImage)
+                enterWith(newTrack, image: art)
             } else if showIncoming {
                 incomingTrack = newTrack
-                incomingImage = playerState.albumArtImage
+                incomingImage = art
             } else {
-                fullTransition(to: newTrack, image: playerState.albumArtImage)
+                fullTransition(to: newTrack, image: art)
             }
         }
         .onChange(of: playerState.albumArtImage) { _, img in

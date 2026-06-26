@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Continuous marquee driven by TimelineView (display-link cadence, never throttled).
-/// - Scrolls without any built-in pause — the cycle wraps seamlessly.
-/// - Pauses on hover, resumes from the exact same position when cursor leaves.
+/// Continuous, seamless marquee text driven by TimelineView (display-link cadence).
+/// - Scrolls without any pause between passes — wraps are visually seamless because
+///   the HStack contains two identical copies of the text.
+/// - Freezes in place while the cursor hovers, resumes from the exact same position.
 struct MarqueeText: View {
     let text: String
     let font: Font
@@ -10,14 +11,12 @@ struct MarqueeText: View {
 
     @State private var naturalWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
-    /// The reference point for elapsed time. Shifted forward whenever hover ends
-    /// so the resume position matches the freeze position exactly.
     @State private var cycleStart: Date = .now
     @State private var isHovering = false
     @State private var hoverStart: Date? = nil
 
-    private let gap: CGFloat = 30      // space between the two text copies
-    private let speed: CGFloat = 44    // points per second
+    private let gap: CGFloat = 30
+    private let speed: CGFloat = 44   // points per second
 
     private var needsScroll: Bool {
         naturalWidth > 0 && containerWidth > 0 && naturalWidth > containerWidth
@@ -25,45 +24,44 @@ struct MarqueeText: View {
 
     private var scrollDist: CGFloat { naturalWidth + gap }
 
-    /// Pure time → x mapping. Called every display-link frame by TimelineView.
+    // Called every display-link frame — pure math, no state mutation.
     private func xOffset(at date: Date) -> CGFloat {
         guard needsScroll, naturalWidth > 0 else { return 0 }
-        // When hovering, freeze elapsed at the moment hover started.
         let effectiveDate = isHovering ? (hoverStart ?? date) : date
-        let elapsed = max(effectiveDate.timeIntervalSince(cycleStart), 0)
-        let cycleDuration = Double(scrollDist) / Double(speed)
-        let phase = elapsed.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+        let elapsed  = max(effectiveDate.timeIntervalSince(cycleStart), 0)
+        let cycleDur = Double(scrollDist) / Double(speed)
+        let phase    = elapsed.truncatingRemainder(dividingBy: cycleDur) / cycleDur
         return -CGFloat(phase) * scrollDist
     }
 
     var body: some View {
-        // Color.clear is the layout anchor — its width is always exactly the
-        // container width regardless of how wide the HStack overlay is.
         Color.clear
             .frame(maxWidth: .infinity, minHeight: 20)
+            // Hover detection on the clipped container so the hit-test area
+            // matches exactly what the user sees — not the wider HStack.
+            .onHover { hovering in
+                guard needsScroll else { return }
+                if hovering, !isHovering {
+                    hoverStart = Date()
+                    isHovering = true
+                } else if !hovering, isHovering {
+                    // Advance cycleStart by the pause duration so the
+                    // scroll resumes from exactly where it was frozen.
+                    if let start = hoverStart {
+                        cycleStart = cycleStart.addingTimeInterval(
+                            Date().timeIntervalSince(start)
+                        )
+                    }
+                    hoverStart = nil
+                    isHovering = false
+                }
+            }
             .overlay(alignment: .leading) {
                 if needsScroll {
                     TimelineView(.animation) { ctx in
                         HStack(spacing: gap) { label; label }
                             .fixedSize()
                             .offset(x: xOffset(at: ctx.date))
-                    }
-                    .onHover { hovering in
-                        if hovering, !isHovering {
-                            // Freeze: record where we paused
-                            hoverStart = Date()
-                            isHovering = true
-                        } else if !hovering, isHovering {
-                            // Resume: shift cycleStart forward by the duration of the pause
-                            // so xOffset(at:) continues from the frozen position
-                            if let start = hoverStart {
-                                cycleStart = cycleStart.addingTimeInterval(
-                                    Date().timeIntervalSince(start)
-                                )
-                            }
-                            hoverStart = nil
-                            isHovering = false
-                        }
                     }
                 } else {
                     Text(text)
@@ -75,6 +73,7 @@ struct MarqueeText: View {
                 }
             }
             .clipped()
+            // Measure container width
             .background(
                 GeometryReader { g in
                     Color.clear
@@ -82,12 +81,20 @@ struct MarqueeText: View {
                         .onChange(of: g.size.width) { _, w in containerWidth = w }
                 }
             )
+            // Measure natural (unconstrained) text width via an invisible copy.
+            // Reset cycleStart here so the scroll always begins at position 0.
             .background(
                 Text(text).font(font).lineLimit(1).fixedSize().opacity(0)
                     .background(GeometryReader { g in
                         Color.clear
-                            .onAppear { naturalWidth = g.size.width }
-                            .onChange(of: g.size.width) { _, w in naturalWidth = w }
+                            .onAppear {
+                                naturalWidth = g.size.width
+                                cycleStart = .now   // start from x=0 once measured
+                            }
+                            .onChange(of: g.size.width) { _, w in
+                                naturalWidth = w
+                                cycleStart = .now
+                            }
                     })
             )
             .onChange(of: text) { _, _ in

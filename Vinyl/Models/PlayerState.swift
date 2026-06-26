@@ -125,7 +125,6 @@ final class PlayerState: ObservableObject {
         pendingSkipAnimationCount = remaining
         if pendingSkipAnimationCount == 0 {
             skipDirection = nil
-            resolvedSkipDirectionByTrackID.removeAll()
         }
 
         return direction

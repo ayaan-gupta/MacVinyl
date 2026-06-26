@@ -6,6 +6,23 @@ struct SizePreferenceKey: PreferenceKey {
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }
 
+/// Heights for the pixel background: always scaled to the queue-open size, clipped when closed.
+private struct PixelBackgroundMetrics: Equatable {
+    var showQueue: Bool = false
+    var collapsedHeight: CGFloat = 0
+    var expandedHeight: CGFloat = 0
+}
+
+private struct PixelBackgroundMetricsKey: PreferenceKey {
+    static let defaultValue = PixelBackgroundMetrics()
+    static func reduce(value: inout PixelBackgroundMetrics, nextValue: () -> PixelBackgroundMetrics) {
+        let next = nextValue()
+        value.showQueue = next.showQueue
+        if next.collapsedHeight > 0 { value.collapsedHeight = next.collapsedHeight }
+        if next.expandedHeight > 0 { value.expandedHeight = next.expandedHeight }
+    }
+}
+
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
@@ -31,6 +48,7 @@ struct PopoverView: View {
     var onSizeChange: ((CGSize) -> Void)?
 
     @State private var showSettings = false
+    @State private var pixelBackgroundMetrics = PixelBackgroundMetrics()
 
     private var contentWidth: CGFloat {
         themeSettings.active == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
@@ -56,7 +74,14 @@ struct PopoverView: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
         .frame(width: contentWidth)
-        .background(BackgroundView(playerState: playerState, theme: themeSettings.active))
+        .background(
+            BackgroundView(
+                playerState: playerState,
+                theme: themeSettings.active,
+                pixelMetrics: pixelBackgroundMetrics
+            )
+        )
+        .onPreferenceChange(PixelBackgroundMetricsKey.self) { pixelBackgroundMetrics = $0 }
         .background(
             GeometryReader { geo in
                 Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
@@ -71,51 +96,42 @@ struct PopoverView: View {
 private struct BackgroundView: View {
     @ObservedObject var playerState: PlayerState
     let theme: AppTheme
+    var pixelMetrics: PixelBackgroundMetrics = PixelBackgroundMetrics()
 
     var body: some View {
         switch theme {
         case .apple:
+            // Uniform background: dominant color from the album art tinted over near-black.
+            // Perfectly consistent top-to-bottom — no band between top bar and CD area.
             ZStack {
-                Color.black
-                if let img = playerState.albumArtImage {
-                    // Large blur radius makes the color distribution more uniform top-to-bottom.
-                    // The gradient overlay darkens the top and bottom so the top-bar area
-                    // blends into the colorful CD region without a visible band.
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .blur(radius: 70, opaque: true)
-                        .overlay(
-                            LinearGradient(
-                                colors: [
-                                    Color.black.opacity(0.62),
-                                    Color.black.opacity(0.36),
-                                    Color.black.opacity(0.50)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .transition(.opacity)
-                } else {
-                    LinearGradient(
-                        colors: [Color(white: 0.16), Color(white: 0.06)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                }
+                Color(white: 0.06)
+                Color(playerState.accentColor)
+                    .opacity(0.28)
+                    .animation(.easeInOut(duration: 1.2), value: playerState.accentColor.description)
             }
-            .animation(.easeInOut(duration: 1.0), value: playerState.albumArtImage != nil)
 
         case .pixel:
             if let bg = NSImage(named: "pixel_background") {
                 GeometryReader { geo in
-                    let imageHeight = geo.size.width * (bg.size.height / max(bg.size.width, 1))
-                    Image(nsImage: bg)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: geo.size.width, height: imageHeight)
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                        .clipped()
+                    let width = geo.size.width
+                    let collapsed = pixelMetrics.collapsedHeight > 0
+                        ? pixelMetrics.collapsedHeight
+                        : geo.size.height
+                    let expanded = pixelMetrics.expandedHeight > 0
+                        ? pixelMetrics.expandedHeight
+                        : collapsed + PixelTheme.estimatedQueueSectionHeight
+                    let visibleHeight = pixelMetrics.showQueue ? expanded : collapsed
+
+                    ZStack(alignment: .top) {
+                        Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
+                        Image(nsImage: bg)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: width, height: expanded)
+                            .frame(width: width, height: visibleHeight, alignment: .top)
+                            .clipped()
+                    }
                 }
             } else {
                 Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
@@ -141,6 +157,8 @@ struct PlayerContentView: View {
     @State private var showIncoming = false
     @State private var isExiting = false
     @State private var showQueue = false
+    @State private var storedCollapsedHeight: CGFloat = 0
+    @State private var storedExpandedHeight: CGFloat = 0
 
     private enum Transition {
         static let slideOut: Double = 0.09
@@ -210,6 +228,23 @@ struct PlayerContentView: View {
                 QueueView(queue: playerState.queue, theme: themeSettings.active)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.bottom, 6)
+            }
+        }
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { recordBackgroundHeight(geo.size.height) }
+                    .onChange(of: geo.size.height) { _, height in
+                        recordBackgroundHeight(height)
+                    }
+                    .preference(
+                        key: PixelBackgroundMetricsKey.self,
+                        value: PixelBackgroundMetrics(
+                            showQueue: showQueue,
+                            collapsedHeight: showQueue ? storedCollapsedHeight : geo.size.height,
+                            expandedHeight: showQueue ? geo.size.height : storedExpandedHeight
+                        )
+                    )
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: showQueue)
@@ -357,6 +392,16 @@ struct PlayerContentView: View {
         }
         .padding(.horizontal, 14)
         .frame(width: contentWidth)
+    }
+
+    // MARK: - Pixel background metrics
+
+    private func recordBackgroundHeight(_ height: CGFloat) {
+        if showQueue {
+            storedExpandedHeight = height
+        } else {
+            storedCollapsedHeight = height
+        }
     }
 
     // MARK: - Spinner

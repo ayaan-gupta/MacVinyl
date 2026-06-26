@@ -64,9 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let rootView = PopoverView(playerState: playerState, onSizeChange: { [weak self] size in
             guard let self, let pop = self.popover else { return }
-            if abs(size.height - pop.contentSize.height) > 1 {
-                pop.contentSize = size
-            }
+            guard size.height > 10 else { return }  // ignore the height:1 reset frame
+            pop.contentSize = size
         })
         .environmentObject(themeSettings)
 
@@ -158,14 +157,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // Reset popover contentSize immediately on theme switch so the new theme's
-        // layout starts from a clean slate instead of the previous theme's height.
+        // On theme switch, reset contentSize to height=1 so the new theme's
+        // SizePreferenceKey always fires and overrides the stale size.
         themeSettings.$active
             .dropFirst()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] newTheme in
                 guard let self, let pop = self.popover else { return }
-                pop.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 420)
+                let w = newTheme == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
+                pop.contentSize = NSSize(width: w, height: 1)
             }
             .store(in: &cancellables)
     }

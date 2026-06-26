@@ -25,6 +25,9 @@ enum PixelTheme {
     static let controlButtonSize: CGFloat = 40
     static let playButtonSize: CGFloat = 52
     static let topBarIconHeight: CGFloat = 22
+
+    /// Fallback until the queue-open layout height is measured once.
+    static let estimatedQueueSectionHeight: CGFloat = 56
 }
 
 extension Color {

@@ -19,8 +19,10 @@ struct QueueView: View {
 
             if queue.isEmpty {
                 Text("Queue empty — connect Spotify to see Up Next")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(white: 1, opacity: 0.35))
+                    .font(theme == .apple ? .system(size: 11) : PixelTheme.timestampFont)
+                    .foregroundStyle(theme == .apple
+                                     ? Color(white: 1, opacity: 0.35)
+                                     : PixelTheme.secondaryTextColor.opacity(0.7))
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
             } else {

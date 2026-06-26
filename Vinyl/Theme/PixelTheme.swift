@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 
+/// Pixel-theme styling only. Do not use these fonts outside `theme == .pixel` branches.
 enum PixelTheme {
     static let popoverWidth: CGFloat = 320
     static let cdDiameter: CGFloat = 180

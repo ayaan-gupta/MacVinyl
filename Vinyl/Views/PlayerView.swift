@@ -312,8 +312,10 @@ struct ProgressBarView: View {
                 Spacer()
                 Text(formatTime(duration))
             }
-            .font(.system(size: 11).monospacedDigit())
-            .foregroundStyle(Color(white: 1, opacity: 0.55))
+            .font(theme == .apple ? AppleTheme.timestampFont : PixelTheme.timestampFont)
+            .foregroundStyle(theme == .apple
+                             ? Color(white: 1, opacity: 0.55)
+                             : PixelTheme.secondaryTextColor)
         }
     }
 

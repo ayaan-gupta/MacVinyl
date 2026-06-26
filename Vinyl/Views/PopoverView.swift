@@ -55,56 +55,46 @@ struct PopoverView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .top) {
-                if themeSettings.active != .apple {
-                    BackgroundView(
-                        playerState: playerState,
-                        theme: themeSettings.active,
-                        isSettings: showSettings,
-                        pixelHeights: pixelHeights,
-                        containerWidth: geo.size.width,
-                        containerHeight: geo.size.height
-                    )
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                }
+        ZStack(alignment: .top) {
+            BackgroundView(
+                playerState: playerState,
+                theme: themeSettings.active,
+                isSettings: showSettings,
+                pixelHeights: pixelHeights
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Group {
-                    if showSettings {
-                        SettingsView(playerState: playerState,
-                                     onDismiss: { withAnimation { showSettings = false } })
-                            .environmentObject(themeSettings)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .transition(.asymmetric(insertion: .move(edge: .trailing),
-                                                    removal:   .move(edge: .trailing)))
-                    } else {
-                        PlayerContentView(
-                            playerState: playerState,
-                            showQueue: $showQueue,
-                            onShowSettings: { withAnimation { showSettings = true } }
-                        )
+            Group {
+                if showSettings {
+                    SettingsView(playerState: playerState,
+                                 onDismiss: { withAnimation { showSettings = false } })
                         .environmentObject(themeSettings)
-                        .transition(.asymmetric(insertion: .move(edge: .leading),
-                                                removal:   .move(edge: .leading)))
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .transition(.asymmetric(insertion: .move(edge: .trailing),
+                                                removal:   .move(edge: .trailing)))
+                } else {
+                    PlayerContentView(
+                        playerState: playerState,
+                        showQueue: $showQueue,
+                        onShowSettings: { withAnimation { showSettings = true } }
+                    )
+                    .environmentObject(themeSettings)
+                    .transition(.asymmetric(insertion: .move(edge: .leading),
+                                            removal:   .move(edge: .leading)))
                 }
-                .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
-                .frame(width: contentWidth, alignment: .top)
-                .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
+            .frame(width: contentWidth, alignment: .top)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(width: contentWidth)
-        .background {
-            if themeSettings.active == .apple {
-                ApplePopoverWindowBackdrop(
-                    accent: playerState.accentColor,
-                    image: playerState.albumArtImage
-                )
-                .frame(width: 0, height: 0)
-            }
-        }
+        .fixedSize(horizontal: false, vertical: true)
         .background(PopoverChromeHider().frame(width: 0, height: 0))
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
+            }
+        )
         .onPreferenceChange(PixelPopoverHeightsKey.self) { pixelHeights = $0 }
         .onPreferenceChange(SizePreferenceKey.self) { size in
             guard !queueResizeInProgress else { return }
@@ -139,40 +129,94 @@ private struct BackgroundView: View {
     let theme: AppTheme
     var isSettings: Bool = false
     var pixelHeights: PixelPopoverHeights = PixelPopoverHeights()
-    var containerWidth: CGFloat = 0
-    var containerHeight: CGFloat = 0
 
     var body: some View {
-        switch theme {
-        case .apple:
-            EmptyView()
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
 
-        case .pixel:
-            if isSettings {
-                Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
-            } else if let bg = NSImage(named: "pixel_background") {
-                let width = containerWidth > 0 ? containerWidth : PixelTheme.popoverWidth
-                let collapsed = pixelHeights.collapsed > 0 ? pixelHeights.collapsed : containerHeight
-                let expanded = pixelHeights.expanded > 0
-                    ? pixelHeights.expanded
-                    : collapsed + PixelTheme.estimatedQueueSectionHeight
-                let clipHeight = containerHeight > 0 ? containerHeight : collapsed
+            switch theme {
+            case .apple:
+                AppleAlbumBackground(
+                    accent: playerState.accentColor,
+                    image: playerState.albumArtImage
+                )
+                .frame(width: w, height: h)
 
-                ZStack(alignment: .top) {
+            case .pixel:
+                if isSettings {
+                    Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
+                        .frame(width: w, height: h)
+                } else if let bg = NSImage(named: "pixel_background") {
+                    let collapsed = pixelHeights.collapsed > 0 ? pixelHeights.collapsed : h
+                    let expanded = pixelHeights.expanded > 0
+                        ? pixelHeights.expanded
+                        : collapsed + PixelTheme.estimatedQueueSectionHeight
+
                     Image(nsImage: bg)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: width, height: expanded)
+                        .frame(width: w, height: expanded)
+                        .frame(width: w, height: h, alignment: .top)
                         .clipped()
+                        .transaction { $0.animation = nil }
+                } else {
+                    Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
+                        .frame(width: w, height: h)
                 }
-                .frame(width: width, height: clipHeight, alignment: .top)
-                .clipped()
-                .transaction { $0.animation = nil }
-            } else {
-                Color(red: 0.12, green: 0.09, blue: 0.06, alpha: 1)
             }
         }
+    }
+}
+
+/// Vibrant glass backdrop — one layer behind all content, sized to the popover.
+private struct AppleAlbumBackground: View {
+    let accent: NSColor
+    let image: NSImage?
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.04)
+
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: AppleTheme.backdropBlurRadius, opaque: true)
+                    .saturation(AppleTheme.backdropSaturation)
+                    .brightness(AppleTheme.backdropBrightness)
+            }
+
+            LinearGradient(
+                colors: gradientColors,
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .opacity(image != nil ? 0.58 : 0.78)
+
+            RadialGradient(
+                colors: [glowColor.opacity(0.34), glowColor.opacity(0.10), .clear],
+                center: .top,
+                startRadius: 0,
+                endRadius: 220
+            )
+
+            Color.black.opacity(0.14)
+
+            VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
+                .opacity(0.36)
+        }
+        .animation(.easeInOut(duration: 0.9), value: image != nil)
+        .animation(.easeInOut(duration: 1.0), value: accent.description)
+    }
+
+    private var gradientColors: [Color] {
+        AppleTheme.backdropGradientColors(from: accent).linear.map { Color($0) }
+    }
+
+    private var glowColor: Color {
+        Color(AppleTheme.backdropGradientColors(from: accent).glow)
     }
 }
 
@@ -193,6 +237,7 @@ struct PlayerContentView: View {
     @State private var incomingImage: NSImage? = nil
     @State private var showIncoming = false
     @State private var isExiting = false
+    @State private var lastTrackID: String = ""
     @State private var storedCollapsedHeight: CGFloat = 0
     @State private var storedExpandedHeight: CGFloat = 0
 
@@ -209,6 +254,7 @@ struct PlayerContentView: View {
         self.onShowSettings = onShowSettings
         _displayedTrack = State(initialValue: playerState.currentTrack)
         _displayedImage = State(initialValue: playerState.albumArtImage)
+        _lastTrackID = State(initialValue: playerState.currentTrack.id)
     }
 
     private var isApple: Bool { themeSettings.active == .apple }
@@ -298,8 +344,9 @@ struct PlayerContentView: View {
             beginExit(direction: direction)
         }
         .onChange(of: playerState.currentTrack) { _, newTrack in
-            guard newTrack.id != displayedTrack.id else { return }
-            let direction = playerState.skipDirection ?? 1
+            guard newTrack.id != lastTrackID else { return }
+            let direction = playerState.skipAnimationDirection(from: lastTrackID, to: newTrack.id)
+            lastTrackID = newTrack.id
             let art = artForTrack(newTrack)
             if isExiting {
                 enterWith(newTrack, image: art, direction: direction)
@@ -514,7 +561,6 @@ struct PlayerContentView: View {
             outgoingX = 0
             showIncoming = false
             isExiting = false
-            playerState.skipDirection = nil
             syncSpinner()
         }
     }

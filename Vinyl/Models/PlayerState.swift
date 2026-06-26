@@ -18,6 +18,10 @@ final class PlayerState: ObservableObject {
     @Published var skipDirection: CGFloat? = nil
     /// Triggers an immediate slide-out animation when the user presses skip.
     @Published var skipExitDirection: CGFloat? = nil
+    /// Remaining track-change animations expected after rapid skip presses.
+    private(set) var pendingSkipAnimationCount = 0
+    private var skipDirectionConsumedForTrackID: String?
+    private var resolvedSkipDirectionByTrackID: [String: CGFloat] = [:]
 
     /// Spotify restarts the current track when previous is pressed after this many seconds.
     static let skipRestartThreshold: TimeInterval = 3
@@ -78,8 +82,52 @@ final class PlayerState: ObservableObject {
         let previousKey = currentTrack.id
         skipDirection = direction
         skipExitDirection = direction
+        pendingSkipAnimationCount += 1
+        resolvedSkipDirectionByTrackID.removeAll()
+        skipDirectionConsumedForTrackID = nil
         if direction > 0 { AppleScriptBridge.nextTrack() }
         else { AppleScriptBridge.previousTrack() }
         PollingService.shared.pollUntilTrackChanges(from: previousKey)
+    }
+
+    /// Direction for the next record slide; keeps backward/forward consistent across rapid skips.
+    func skipAnimationDirection(from previousTrackID: String, to newTrackID: String) -> CGFloat {
+        if let cached = resolvedSkipDirectionByTrackID[newTrackID] {
+            return cached
+        }
+
+        let direction: CGFloat
+        if let skipDirection {
+            direction = skipDirection
+        } else if let oldIndex = queue.firstIndex(where: { $0.id == previousTrackID }),
+                  let newIndex = queue.firstIndex(where: { $0.id == newTrackID }),
+                  oldIndex != newIndex {
+            direction = newIndex > oldIndex ? 1 : -1
+        } else {
+            direction = 1
+        }
+
+        resolvedSkipDirectionByTrackID[newTrackID] = direction
+
+        guard pendingSkipAnimationCount > 0,
+              skipDirectionConsumedForTrackID != newTrackID else { return direction }
+
+        skipDirectionConsumedForTrackID = newTrackID
+
+        var remaining = pendingSkipAnimationCount - 1
+        if let oldIndex = queue.firstIndex(where: { $0.id == previousTrackID }),
+           let newIndex = queue.firstIndex(where: { $0.id == newTrackID }) {
+            let hops = abs(newIndex - oldIndex)
+            if hops > 1 {
+                remaining = max(0, pendingSkipAnimationCount - hops)
+            }
+        }
+        pendingSkipAnimationCount = remaining
+        if pendingSkipAnimationCount == 0 {
+            skipDirection = nil
+            resolvedSkipDirectionByTrackID.removeAll()
+        }
+
+        return direction
     }
 }

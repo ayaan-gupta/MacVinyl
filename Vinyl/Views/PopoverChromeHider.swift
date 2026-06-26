@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Clears default NSPopover chrome so our window-level backdrop shows through.
-/// Preserves Vinyl-owned backdrop views (glass layer included).
+/// Clears default NSPopover window chrome so the SwiftUI background shows through.
 struct PopoverChromeHider: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
@@ -23,24 +22,39 @@ struct PopoverChromeHider: NSViewRepresentable {
         guard let contentView = window.contentView else { return }
         contentView.wantsLayer = true
         contentView.layer?.backgroundColor = NSColor.clear.cgColor
-        hidePopoverChrome(in: contentView)
+        clearChrome(in: contentView)
     }
 
-    private static func hidePopoverChrome(in view: NSView) {
+    private static func clearChrome(in view: NSView) {
         for subview in view.subviews {
-            if subview.isVinylOwnedBackdrop { continue }
-
             if let effect = subview as? NSVisualEffectView {
-                effect.isHidden = true
-                effect.alphaValue = 0
-            } else {
-                let name = String(describing: type(of: subview))
-                if name.contains("Popover") || name.contains("Frame") || name.contains("Border") {
-                    subview.wantsLayer = true
-                    subview.layer?.backgroundColor = NSColor.clear.cgColor
+                if effect.containsSwiftUIHosting {
+                    effect.isHidden = false
+                    effect.alphaValue = 1
+                    effect.material = .underWindowBackground
+                    effect.blendingMode = .behindWindow
+                    effect.wantsLayer = true
+                    effect.layer?.backgroundColor = NSColor.clear.cgColor
+                } else {
+                    effect.isHidden = true
+                    effect.alphaValue = 0
                 }
-                hidePopoverChrome(in: subview)
+                continue
             }
+
+            let name = String(describing: type(of: subview))
+            if name.contains("Popover") || name.contains("Frame") || name.contains("Border") {
+                subview.wantsLayer = true
+                subview.layer?.backgroundColor = NSColor.clear.cgColor
+            }
+            clearChrome(in: subview)
         }
+    }
+}
+
+private extension NSView {
+    var containsSwiftUIHosting: Bool {
+        if String(describing: type(of: self)).contains("Hosting") { return true }
+        return subviews.contains { $0.containsSwiftUIHosting }
     }
 }

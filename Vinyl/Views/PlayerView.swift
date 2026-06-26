@@ -130,8 +130,8 @@ struct PixelTurntableView: View {
         }
         .onChange(of: playerState.currentTrack) { _, newTrack in
             guard newTrack.id != lastTrackID else { return }
+            let direction = playerState.skipAnimationDirection(from: lastTrackID, to: newTrack.id)
             lastTrackID = newTrack.id
-            let direction = playerState.skipDirection ?? 1
             let art = artForTrack(newTrack)
             if isExiting {
                 enterRecord(with: art, direction: direction)

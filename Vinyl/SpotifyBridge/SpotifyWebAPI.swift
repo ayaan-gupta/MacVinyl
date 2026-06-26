@@ -373,7 +373,7 @@ final class SpotifyWebAPI: ObservableObject {
 
     private static func parseQueueResponse(_ data: Data) -> (tracks: [Track], currentlyPlayingID: String?) {
         if let decoded = try? JSONDecoder().decode(QueueResponse.self, from: data) {
-            return (decoded.queue.map(\.toTrack), decoded.currently_playing?.id)
+            return (decoded.queue.map { $0.toTrack() }, decoded.currently_playing?.id)
         }
         return parseQueueResponseLeniently(data)
     }

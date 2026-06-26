@@ -314,6 +314,9 @@ struct PlayerContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
         }
+        .onChange(of: showQueue) { _, isOpen in
+            if isOpen { PollingService.shared.refreshQueueNow() }
+        }
         .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { geo in

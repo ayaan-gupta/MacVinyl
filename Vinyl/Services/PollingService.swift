@@ -9,6 +9,8 @@ final class PollingService {
     private var lastTrackKey: String = ""
     private var pendingQueueFetch: DispatchWorkItem?
     private var skipPollGeneration = 0
+    private var isQueueFetchInFlight = false
+    private var lastQueueFetchAt: Date = .distantPast
 
     private init() {}
 
@@ -30,6 +32,10 @@ final class PollingService {
 
     func refreshNow() {
         DispatchQueue.global(qos: .utility).async { [weak self] in self?.fetchFullState() }
+    }
+
+    func refreshQueueNow() {
+        performQueueFetch(force: true)
     }
 
     /// Rapidly polls Spotify until the track identity changes (after skip).
@@ -64,8 +70,8 @@ final class PollingService {
         tickCount += 1
         fetchPosition()
         if tickCount % 3 == 0 { fetchFullState() }
-        if tickCount % 20 == 0, SpotifyWebAPI.shared.isAuthenticated {
-            refreshQueueFromAPI(fallbackTrackKey: lastTrackKey, trackChanged: false)
+        if tickCount % 16 == 0, SpotifyWebAPI.shared.isAuthenticated {
+            performQueueFetch(force: false)
         }
     }
 
@@ -120,15 +126,19 @@ final class PollingService {
                     }
                     AlbumArtLoader.shared.load(trackID: key, url: artURL)
                 }
+
+                if SpotifyWebAPI.shared.isAuthenticated {
+                    self.performQueueFetch(force: true)
+                }
             }
 
             if SpotifyWebAPI.shared.isAuthenticated {
-                self.refreshQueueFromAPI(fallbackTrackKey: key, trackChanged: trackChanged)
+                self.refreshTrackMetadataFromAPI(fallbackTrackKey: key, trackChanged: trackChanged)
             }
         }
     }
 
-    private func refreshQueueFromAPI(fallbackTrackKey: String, trackChanged: Bool) {
+    private func refreshTrackMetadataFromAPI(fallbackTrackKey: String, trackChanged: Bool) {
         SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
             let state = PlayerState.shared
             if trackChanged, let track {
@@ -144,18 +154,23 @@ final class PollingService {
             if let artURL {
                 AlbumArtLoader.shared.load(trackID: fallbackTrackKey, url: artURL)
             }
-            self.scheduleQueueFetch(for: track?.id)
         }
     }
 
-    private func scheduleQueueFetch(for trackID: String?) {
-        pendingQueueFetch?.cancel()
-        let item = DispatchWorkItem {
-            SpotifyWebAPI.shared.fetchQueue(expectedTrackID: trackID) { tracks in
+    private func performQueueFetch(force: Bool) {
+        guard SpotifyWebAPI.shared.isAuthenticated else { return }
+        guard !isQueueFetchInFlight else { return }
+
+        let now = Date()
+        if !force, now.timeIntervalSince(lastQueueFetchAt) < 3 { return }
+
+        isQueueFetchInFlight = true
+        SpotifyWebAPI.shared.fetchQueue { tracks in
+            DispatchQueue.main.async {
                 PlayerState.shared.queue = tracks
+                self.isQueueFetchInFlight = false
+                self.lastQueueFetchAt = Date()
             }
         }
-        pendingQueueFetch = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: item)
     }
 }

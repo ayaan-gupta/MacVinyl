@@ -159,7 +159,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startServices() {
         if SpotifyWebAPI.shared.isAuthenticated {
             SpotifyWebAPI.shared.validateSession { success in
-                if success { PollingService.shared.refreshNow() }
+                if success {
+                    PollingService.shared.refreshNow()
+                    PollingService.shared.refreshQueueNow()
+                }
             }
         }
         VinylSpinner.shared.start()

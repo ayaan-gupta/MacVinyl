@@ -19,16 +19,67 @@ private struct TokenResponse: Decodable {
 }
 
 private struct CurrentlyPlayingResponse: Decodable {
-    let item: SpotifyTrackItem?
+    let item: PlayableItem?
     let is_playing: Bool?
 }
 
-private struct SpotifyTrackItem: Decodable {
+private struct QueueResponse: Decodable {
+    let currently_playing: PlayableItem?
+    let queue: [PlayableItem]
+}
+
+private struct PlayableItem: Decodable {
     let id: String
     let name: String
     let duration_ms: Int
-    let artists: [SpotifyArtist]
-    let album: SpotifyAlbum
+    let artists: [SpotifyArtist]?
+    let album: SpotifyAlbum?
+    let images: [SpotifyImage]?
+    let show: SpotifyShow?
+
+    func toTrack() -> Track {
+        let artistName: String
+        if let artists, !artists.isEmpty {
+            artistName = artists.map(\.name).joined(separator: ", ")
+        } else if let showName = show?.name, !showName.isEmpty {
+            artistName = showName
+        } else {
+            artistName = ""
+        }
+
+        let artURL = Self.bestArtURL(albumImages: album?.images, itemImages: images)
+        return Track(
+            id: id,
+            title: name,
+            artist: artistName,
+            albumArtURL: artURL,
+            duration: TimeInterval(duration_ms) / 1000
+        )
+    }
+
+    private static func bestArtURL(albumImages: [SpotifyImage]?, itemImages: [SpotifyImage]?) -> URL? {
+        let images = albumImages ?? itemImages ?? []
+        return images
+            .sorted { ($0.width ?? 0) > ($1.width ?? 0) }
+            .first
+            .flatMap { URL(string: $0.url) }
+    }
+}
+
+private struct SpotifyShow: Decodable {
+    let name: String?
+}
+
+private struct DevicesResponse: Decodable {
+    let devices: [SpotifyDevice]
+}
+
+private struct SpotifyDevice: Decodable {
+    let id: String
+    let is_active: Bool
+    let is_restricted: Bool
+    let name: String
+    let type: String
 }
 
 private struct SpotifyArtist: Decodable {
@@ -36,18 +87,13 @@ private struct SpotifyArtist: Decodable {
 }
 
 private struct SpotifyAlbum: Decodable {
-    let images: [SpotifyImage]
+    let images: [SpotifyImage]?
 }
 
 private struct SpotifyImage: Decodable {
     let url: String
     let width: Int?
     let height: Int?
-}
-
-private struct QueueResponse: Decodable {
-    let currently_playing: SpotifyTrackItem?
-    let queue: [SpotifyTrackItem]
 }
 
 // MARK: - Token manager
@@ -149,6 +195,7 @@ final class SpotifyWebAPI: ObservableObject {
                 }
                 PlayerState.shared.authState = .authenticated
                 PollingService.shared.refreshNow()
+                PollingService.shared.refreshQueueNow()
             }
         }.resume()
     }
@@ -247,67 +294,176 @@ final class SpotifyWebAPI: ObservableObject {
     // MARK: - API calls
 
     func fetchCurrentlyPlaying(completion: @escaping (Track?, URL?) -> Void) {
-        authorizedRequest(path: "/v1/me/player/currently-playing") { [weak self] data, response in
-            guard let self else { return }
-            guard let http = response as? HTTPURLResponse else {
-                DispatchQueue.main.async { completion(nil, nil) }
-                return
-            }
-            if http.statusCode == 204 || data == nil {
-                DispatchQueue.main.async { completion(nil, nil) }
-                return
-            }
-            guard http.statusCode == 200,
-                  let data,
-                  let parsed = try? JSONDecoder().decode(CurrentlyPlayingResponse.self, from: data),
-                  let item = parsed.item else {
-                DispatchQueue.main.async { completion(nil, nil) }
-                return
-            }
+        withActiveDevice {
+            self.authorizedRequest(path: "/v1/me/player/currently-playing") { data, response in
+                guard let http = response as? HTTPURLResponse else {
+                    DispatchQueue.main.async { completion(nil, nil) }
+                    return
+                }
+                if http.statusCode == 204 || data == nil {
+                    DispatchQueue.main.async { completion(nil, nil) }
+                    return
+                }
+                guard http.statusCode == 200,
+                      let data,
+                      let parsed = try? JSONDecoder().decode(CurrentlyPlayingResponse.self, from: data),
+                      let item = parsed.item else {
+                    DispatchQueue.main.async { completion(nil, nil) }
+                    return
+                }
 
-            let artistName = item.artists.map(\.name).joined(separator: ", ")
-            let artURL = item.album.images.sorted(by: { ($0.width ?? 0) > ($1.width ?? 0) }).first.flatMap { URL(string: $0.url) }
-            let track = Track(id: item.id, title: item.name, artist: artistName,
-                              albumArtURL: artURL, duration: TimeInterval(item.duration_ms) / 1000)
-            DispatchQueue.main.async { completion(track, artURL) }
+                let track = item.toTrack()
+                DispatchQueue.main.async { completion(track, track.albumArtURL) }
+            }
         }
     }
 
-    func fetchQueue(expectedTrackID: String? = nil, retryCount: Int = 0, completion: @escaping ([Track]) -> Void) {
-        authorizedRequest(path: "/v1/me/player/queue") { [weak self] data, response in
-            guard let self else { return }
-            guard let http = response as? HTTPURLResponse else {
-                DispatchQueue.main.async { completion([]) }
-                return
-            }
-            if http.statusCode == 204 || data == nil {
-                DispatchQueue.main.async { completion([]) }
-                return
-            }
-            guard http.statusCode == 200,
-                  let data,
-                  let parsed = try? JSONDecoder().decode(QueueResponse.self, from: data) else {
-                DispatchQueue.main.async { completion([]) }
-                return
-            }
-
-            if let expectedTrackID,
-               let playingID = parsed.currently_playing?.id,
-               playingID != expectedTrackID,
-               retryCount < 5 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    self.fetchQueue(expectedTrackID: expectedTrackID, retryCount: retryCount + 1, completion: completion)
+    func fetchQueue(
+        expectedTrackID: String? = nil,
+        retryCount: Int = 0,
+        completion: @escaping ([Track]) -> Void
+    ) {
+        withActiveDevice {
+            self.authorizedRequest(path: "/v1/me/player/queue") { data, response in
+                guard let http = response as? HTTPURLResponse else {
+                    DispatchQueue.main.async { completion([]) }
+                    return
                 }
+                if http.statusCode == 403 {
+                    DispatchQueue.main.async { completion([]) }
+                    return
+                }
+                if http.statusCode == 204 || data == nil {
+                    DispatchQueue.main.async { completion([]) }
+                    return
+                }
+                guard http.statusCode == 200, let data else {
+                    DispatchQueue.main.async { completion([]) }
+                    return
+                }
+
+                let parsed = Self.parseQueueResponse(data)
+
+                if let expectedTrackID,
+                   let playingID = parsed.currentlyPlayingID,
+                   playingID != expectedTrackID,
+                   retryCount < 3 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        self.fetchQueue(
+                            expectedTrackID: expectedTrackID,
+                            retryCount: retryCount + 1,
+                            completion: completion
+                        )
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async { completion(parsed.tracks) }
+            }
+        }
+    }
+
+    /// Ensures Spotify Connect sees this Mac as the active device, then fetches queue.
+    func refreshQueue(completion: (([Track]) -> Void)? = nil) {
+        fetchQueue { tracks in
+            PlayerState.shared.queue = tracks
+            completion?(tracks)
+        }
+    }
+
+    private static func parseQueueResponse(_ data: Data) -> (tracks: [Track], currentlyPlayingID: String?) {
+        if let decoded = try? JSONDecoder().decode(QueueResponse.self, from: data) {
+            return (decoded.queue.map(\.toTrack), decoded.currently_playing?.id)
+        }
+        return parseQueueResponseLeniently(data)
+    }
+
+    /// Fallback when strict decoding fails (episodes, local files, etc.).
+    private static func parseQueueResponseLeniently(_ data: Data) -> (tracks: [Track], currentlyPlayingID: String?) {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ([], nil)
+        }
+
+        let currentlyPlayingID = (json["currently_playing"] as? [String: Any])?["id"] as? String
+        let queueArray = json["queue"] as? [[String: Any]] ?? []
+        let tracks = queueArray.compactMap { parseMediaDictionary($0) }
+        return (tracks, currentlyPlayingID)
+    }
+
+    private static func parseMediaDictionary(_ dict: [String: Any]) -> Track? {
+        guard let id = dict["id"] as? String,
+              let name = dict["name"] as? String else { return nil }
+
+        let durationMs = dict["duration_ms"] as? Int ?? 0
+
+        var artist = ""
+        if let artists = dict["artists"] as? [[String: Any]] {
+            artist = artists.compactMap { $0["name"] as? String }.joined(separator: ", ")
+        } else if let show = dict["show"] as? [String: Any],
+                  let showName = show["name"] as? String {
+            artist = showName
+        }
+
+        var artURL: URL?
+        if let album = dict["album"] as? [String: Any],
+           let images = album["images"] as? [[String: Any]] {
+            artURL = bestImageURL(from: images)
+        } else if let images = dict["images"] as? [[String: Any]] {
+            artURL = bestImageURL(from: images)
+        }
+
+        return Track(
+            id: id,
+            title: name,
+            artist: artist,
+            albumArtURL: artURL,
+            duration: TimeInterval(durationMs) / 1000
+        )
+    }
+
+    private static func bestImageURL(from images: [[String: Any]]) -> URL? {
+        let sorted = images.sorted {
+            (($0["width"] as? Int) ?? 0) > (($1["width"] as? Int) ?? 0)
+        }
+        guard let urlString = sorted.first?["url"] as? String else { return nil }
+        return URL(string: urlString)
+    }
+
+    private func withActiveDevice(_ work: @escaping () -> Void) {
+        ensureActiveDevice { _ in work() }
+    }
+
+    private func ensureActiveDevice(completion: @escaping (Bool) -> Void) {
+        authorizedRequest(path: "/v1/me/player/devices") { data, response in
+            guard let data,
+                  let http = response as? HTTPURLResponse,
+                  http.statusCode == 200,
+                  let parsed = try? JSONDecoder().decode(DevicesResponse.self, from: data) else {
+                DispatchQueue.main.async { completion(false) }
                 return
             }
 
-            let tracks = parsed.queue.map { item -> Track in
-                let artist = item.artists.map(\.name).joined(separator: ", ")
-                let art = item.album.images.sorted(by: { ($0.width ?? 0) > ($1.width ?? 0) }).first.flatMap { URL(string: $0.url) }
-                return Track(id: item.id, title: item.name, artist: artist,
-                             albumArtURL: art, duration: TimeInterval(item.duration_ms) / 1000)
+            if parsed.devices.contains(where: { $0.is_active && !$0.is_restricted }) {
+                DispatchQueue.main.async { completion(true) }
+                return
             }
-            DispatchQueue.main.async { completion(tracks) }
+
+            let candidate = parsed.devices.first(where: { $0.type == "Computer" && !$0.is_restricted })
+                ?? parsed.devices.first(where: { !$0.is_restricted })
+
+            guard let device = candidate else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            self.authorizedJSONRequest(
+                method: "PUT",
+                path: "/v1/me/player",
+                json: ["device_ids": [device.id], "play": false]
+            ) { response in
+                let ok = (response as? HTTPURLResponse)?.statusCode == 204
+                DispatchQueue.main.async { completion(ok) }
+            }
         }
     }
 

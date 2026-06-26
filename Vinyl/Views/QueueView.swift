@@ -10,7 +10,7 @@ struct QueueView: View {
     private var emptyMessage: String {
         switch authState {
         case .authenticated:
-            return "Queue empty — play something in Spotify to see Up Next"
+            return "Nothing up next — add songs to your Spotify queue"
         case .needsReauth:
             return "Reconnect Spotify in Settings to see Up Next"
         case .unauthenticated:

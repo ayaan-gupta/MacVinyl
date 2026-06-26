@@ -59,7 +59,7 @@ enum PixelTurntableLayout {
     static var angleOff: Double = 5
 
     /// Arm angle when playing (on the record).
-    static var angleOn: Double = 35
+    static var angleOn: Double = 34
 
     // MARK: Tonearm wiggle (while playing)
 

@@ -30,7 +30,7 @@ enum PixelTheme {
     static let topBarClearance: CGFloat = 38
 
     /// Fallback queue strip height until the open layout is measured once.
-    static let estimatedQueueSectionHeight: CGFloat = 58
+    static let estimatedQueueSectionHeight: CGFloat = 120
 }
 
 extension Color {

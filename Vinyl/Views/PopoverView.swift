@@ -303,7 +303,7 @@ struct PlayerContentView: View {
 
                 if showQueue {
                     Rectangle().fill(Color(white: 1, opacity: 0.1)).frame(height: 1).padding(.horizontal, 10)
-                    QueueView(queue: playerState.queue, authState: playerState.authState, theme: themeSettings.active)
+                    QueueView(playerState: playerState, theme: themeSettings.active)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .padding(.bottom, 6)
                 }

@@ -26,6 +26,9 @@ enum PixelTurntableLayout {
     /// Lower = chunkier / more pixelated. Higher = sharper / less pixelated. Try 12–48.
     static var artPixelCount: Double = 35
 
+    /// Queue row album art — sharper than the turntable record hole.
+    static var queueArtPixelCount: Double = 72
+
     // MARK: Tonearm size
 
     /// Tonearm image height as a fraction of turntable height.

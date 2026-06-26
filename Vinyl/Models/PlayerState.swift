@@ -48,6 +48,27 @@ final class PlayerState: ObservableObject {
         isPlaying = playing
     }
 
+    func playQueueTrack(at index: Int) {
+        guard index >= 0, index < queue.count else { return }
+        let trackIDs = queue[index...].map(\.id)
+        SpotifyWebAPI.shared.playTracks(trackIDs: Array(trackIDs))
+    }
+
+    func reorderQueue(draggedID: String, beforeID: String) {
+        guard let from = queue.firstIndex(where: { $0.id == draggedID }),
+              let to = queue.firstIndex(where: { $0.id == beforeID }),
+              from != to else { return }
+
+        var updated = queue
+        let item = updated.remove(at: from)
+        let destination = to > from ? to - 1 : to
+        updated.insert(item, at: destination)
+        queue = updated
+
+        let resumeMs = Int(progress * 1000)
+        SpotifyWebAPI.shared.syncUpcomingQueue(trackIDs: updated.map(\.id), resumePositionMs: resumeMs)
+    }
+
     func requestSkip(direction: CGFloat) {
         if direction < 0 && progress > Self.skipRestartThreshold {
             AppleScriptBridge.previousTrack()

@@ -339,28 +339,9 @@ struct PixelTurntableView: View {
             return
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.makePixelatedArt(image)
+            let result = AlbumArtPixelator.pixelate(image, pixelCount: PixelTurntableLayout.artPixelCount)
             DispatchQueue.main.async { completion(result) }
         }
-    }
-
-    /// Applies a CIPixellate filter so the art looks appropriately 8-bit inside the
-    /// record hole while remaining recognisable.
-    private static func makePixelatedArt(_ image: NSImage) -> NSImage {
-        guard let cgSrc = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return image
-        }
-        let ciInput = CIImage(cgImage: cgSrc)
-        guard let filter = CIFilter(name: "CIPixellate") else { return image }
-        filter.setValue(ciInput, forKey: kCIInputImageKey)
-        let targetPixelCount = max(4, PixelTurntableLayout.artPixelCount)
-        let scale = max(2.0, Double(cgSrc.width) / targetPixelCount)
-        filter.setValue(scale, forKey: kCIInputScaleKey)
-        guard let output = filter.outputImage else { return image }
-        let ctx = CIContext(options: [.useSoftwareRenderer: false])
-        // Crop to original extent to avoid the half-pixel border CIPixellate adds
-        guard let cgOut = ctx.createCGImage(output, from: ciInput.extent) else { return image }
-        return NSImage(cgImage: cgOut, size: NSSize(width: cgSrc.width, height: cgSrc.height))
     }
 }
 

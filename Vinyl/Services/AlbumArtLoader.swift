@@ -39,6 +39,27 @@ final class AlbumArtLoader {
         activeTrackID = nil
     }
 
+    /// Loads art for queue rows without cancelling the now-playing fetch.
+    func loadQueued(url: URL, completion: @escaping (NSImage?) -> Void) {
+        if let cached = cache.object(forKey: url as NSURL) {
+            completion(cached)
+            return
+        }
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            guard let data, let image = NSImage(data: data) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            self.cache.setObject(image, forKey: url as NSURL)
+            DispatchQueue.main.async { completion(image) }
+        }.resume()
+    }
+
     private func deliver(trackID: String, image: NSImage) {
         DispatchQueue.main.async {
             let state = PlayerState.shared

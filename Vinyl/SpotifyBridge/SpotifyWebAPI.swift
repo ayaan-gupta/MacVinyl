@@ -8,7 +8,7 @@ import Combine
 private let kClientID     = "REDACTED_CLIENT_ID"
 private let kClientSecret = "REDACTED_CLIENT_SECRET"
 private let kRedirectURI  = "vinyl://callback"
-private let kScopes       = "user-read-playback-state user-read-currently-playing user-read-recently-played"
+private let kScopes       = "user-read-playback-state user-read-currently-playing user-read-recently-played user-modify-playback-state"
 
 // MARK: - Codable models
 
@@ -311,8 +311,75 @@ final class SpotifyWebAPI: ObservableObject {
         }
     }
 
+    /// Plays the given tracks in order, discarding anything before the first URI.
+    func playTracks(trackIDs: [String], positionMs: Int? = nil, completion: ((Bool) -> Void)? = nil) {
+        guard !trackIDs.isEmpty else {
+            DispatchQueue.main.async { completion?(false) }
+            return
+        }
+
+        var payload: [String: Any] = ["uris": trackIDs.map { "spotify:track:\($0)" }]
+        if let positionMs { payload["position_ms"] = positionMs }
+
+        authorizedJSONRequest(method: "PUT", path: "/v1/me/player/play", json: payload) { response in
+            let ok = (response as? HTTPURLResponse)?.statusCode == 204
+            DispatchQueue.main.async {
+                if ok { PollingService.shared.refreshNow() }
+                completion?(ok)
+            }
+        }
+    }
+
+    /// Keeps the current track playing but replaces the upcoming queue order.
+    func syncUpcomingQueue(trackIDs: [String], resumePositionMs: Int, completion: ((Bool) -> Void)? = nil) {
+        fetchCurrentlyPlaying { current, _ in
+            guard let currentID = current?.id else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.playTracks(trackIDs: [currentID] + trackIDs, positionMs: resumePositionMs, completion: completion)
+        }
+    }
+
     private func authorizedRequest(
         path: String,
+        retryingAfterRefresh: Bool = false,
+        completion: @escaping (Data?, URLResponse?) -> Void
+    ) {
+        authorizedDataRequest(
+            method: "GET",
+            path: path,
+            body: nil,
+            retryingAfterRefresh: retryingAfterRefresh,
+            completion: completion
+        )
+    }
+
+    private func authorizedJSONRequest(
+        method: String,
+        path: String,
+        json: [String: Any],
+        retryingAfterRefresh: Bool = false,
+        completion: @escaping (URLResponse?) -> Void
+    ) {
+        guard let body = try? JSONSerialization.data(withJSONObject: json) else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        authorizedDataRequest(
+            method: method,
+            path: path,
+            body: body,
+            retryingAfterRefresh: retryingAfterRefresh
+        ) { _, response in
+            completion(response)
+        }
+    }
+
+    private func authorizedDataRequest(
+        method: String,
+        path: String,
+        body: Data?,
         retryingAfterRefresh: Bool = false,
         completion: @escaping (Data?, URLResponse?) -> Void
     ) {
@@ -322,14 +389,25 @@ final class SpotifyWebAPI: ObservableObject {
         }
 
         var request = URLRequest(url: URL(string: "https://api.spotify.com\(path)")!)
+        request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             guard let self else { return }
             if let http = response as? HTTPURLResponse, http.statusCode == 401, !retryingAfterRefresh {
                 self.refreshAccessToken { success in
                     if success {
-                        self.authorizedRequest(path: path, retryingAfterRefresh: true, completion: completion)
+                        self.authorizedDataRequest(
+                            method: method,
+                            path: path,
+                            body: body,
+                            retryingAfterRefresh: true,
+                            completion: completion
+                        )
                     } else {
                         DispatchQueue.main.async { completion(nil, response) }
                     }

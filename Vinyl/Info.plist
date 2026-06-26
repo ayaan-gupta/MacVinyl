@@ -2,9 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSUIElement</key>
+	<true/>
 	<key>ATSApplicationFontsPath</key>
 	<string>Fonts</string>
-	<key>Application is agent (UIElement) </key>
-	<string>YES</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Vinyl controls Spotify playback using Apple Events.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.ayaangupta.Vinyl</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vinyl</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

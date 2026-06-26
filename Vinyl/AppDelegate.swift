@@ -1,0 +1,138 @@
+import AppKit
+import SwiftUI
+import Carbon
+import Combine
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    private var menuBarCoordinator: MenuBarIconCoordinator!
+    private let themeSettings = ThemeSettings.shared
+    private let playerState = PlayerState.shared
+
+    private var cancellables = Set<AnyCancellable>()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMenuBar()
+        setupPopover()
+        setupOAuthHandler()
+        setupWakeObserver()
+        startServices()
+    }
+
+    // MARK: - Menu Bar
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        guard let button = statusItem.button else { return }
+        button.action = #selector(togglePopover)
+        button.target = self
+
+        // Size the custom spinning view to sit centered inside the 22pt slot
+        let size = AppleTheme.menuBarIconSize
+        menuBarCoordinator = MenuBarIconCoordinator(size: size)
+        let spinView = menuBarCoordinator.hostView
+        spinView.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(spinView)
+        NSLayoutConstraint.activate([
+            spinView.widthAnchor.constraint(equalToConstant: size),
+            spinView.heightAnchor.constraint(equalToConstant: size),
+            spinView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            spinView.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+    }
+
+    // MARK: - Popover
+
+    private func setupPopover() {
+        popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+
+        let rootView = PopoverView(playerState: playerState, onSizeChange: { [weak self] size in
+            guard let self, let pop = self.popover else { return }
+            if abs(size.height - pop.contentSize.height) > 1 {
+                pop.contentSize = size
+            }
+        })
+        .environmentObject(themeSettings)
+
+        let vc = NSHostingController(rootView: rootView)
+        vc.view.setFrameSize(NSSize(width: AppleTheme.popoverWidth, height: 400))
+        popover.contentViewController = vc
+        popover.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 400)
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            // The status bar button's window uses a flipped coordinate system.
+            // .maxY = bottom edge of the button = below the menu bar (correct).
+            // Activating first ensures the button's window is key so coordinate
+            // transforms are accurate on the very first click.
+            NSApp.activate(ignoringOtherApps: false)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    // MARK: - OAuth
+
+    private func setupOAuthHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
+        guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: urlString) else { return }
+        SpotifyWebAPI.shared.handleCallback(url: url)
+    }
+
+    // MARK: - Wake
+
+    private func setupWakeObserver() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleWake() {
+        SpotifyWebAPI.shared.handleWake()
+    }
+
+    // MARK: - Services
+
+    private func startServices() {
+        if SpotifyWebAPI.shared.isAuthenticated {
+            playerState.authState = .authenticated
+        }
+        VinylSpinner.shared.start()
+        PollingService.shared.start()
+        HotkeyService.shared.start()
+
+        // Keep spinner in sync with isPlaying even while popover is closed
+        playerState.$isPlaying
+            .receive(on: DispatchQueue.main)
+            .sink { playing in
+                // PlayerContentView overrides this when open; this is the fallback
+                if VinylSpinner.shared.targetDegreesPerSecond == 0 && playing {
+                    VinylSpinner.shared.targetDegreesPerSecond = 120
+                } else if !playing {
+                    VinylSpinner.shared.targetDegreesPerSecond = 0
+                }
+            }
+            .store(in: &cancellables)
+    }
+}

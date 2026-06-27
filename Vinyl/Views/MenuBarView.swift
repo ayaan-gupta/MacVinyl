@@ -69,6 +69,7 @@ final class SpinningMenuBarView: NSView {
 
 // MARK: - Coordinator
 
+@MainActor
 final class MenuBarIconCoordinator: NSObject {
     let hostView: SpinningMenuBarView
     private var cancellables = Set<AnyCancellable>()

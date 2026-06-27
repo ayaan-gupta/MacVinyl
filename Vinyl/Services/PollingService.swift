@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 
+@MainActor
 final class PollingService {
     static let shared = PollingService()
 
@@ -18,7 +19,9 @@ final class PollingService {
         guard pollTimer == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         t.schedule(deadline: .now(), repeating: .milliseconds(500))
-        t.setEventHandler { [weak self] in self?.tick() }
+        t.setEventHandler { [weak self] in
+            Task { @MainActor in self?.tick() }
+        }
         t.resume()
         pollTimer = t
         ProgressInterpolator.shared.start()
@@ -31,7 +34,7 @@ final class PollingService {
     }
 
     func refreshNow() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.fetchFullState() }
+        Task { @MainActor in self.fetchFullState() }
     }
 
     func refreshQueueNow() {
@@ -49,19 +52,23 @@ final class PollingService {
         guard generation == skipPollGeneration, attempt < 40 else { return }
 
         AppleScriptBridge.fetchTrackInfo { [weak self] info in
-            guard let self, generation == self.skipPollGeneration else { return }
-            guard let info else { return }
+            Task { @MainActor in
+                guard let self, generation == self.skipPollGeneration else { return }
+                guard let info else { return }
 
-            let key = "\(info.title)|\(info.artist)"
-            if key != previousKey {
-                self.lastTrackKey = key
-                self.publishTrackInfo(info, key: key, trackChanged: true)
-                return
-            }
+                let key = "\(info.title)|\(info.artist)"
+                if key != previousKey {
+                    self.lastTrackKey = key
+                    self.publishTrackInfo(info, key: key, trackChanged: true)
+                    return
+                }
 
-            let delay = attempt < 8 ? 0.05 : 0.1
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
-                self.attemptTrackChange(excluding: previousKey, generation: generation, attempt: attempt + 1)
+                let delay = attempt < 8 ? 0.05 : 0.1
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
+                    Task { @MainActor in
+                        self.attemptTrackChange(excluding: previousKey, generation: generation, attempt: attempt + 1)
+                    }
+                }
             }
         }
     }
@@ -84,7 +91,7 @@ final class PollingService {
 
     private func fetchFullState() {
         AppleScriptBridge.fetchPlayerState { state in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 switch state {
                 case .playing:  PlayerState.shared.applyPlaybackStateFromPoll(true)
                 default:        PlayerState.shared.applyPlaybackStateFromPoll(false)
@@ -93,66 +100,68 @@ final class PollingService {
         }
 
         AppleScriptBridge.fetchTrackInfo { [weak self] info in
-            guard let self, let info else { return }
-            let key = "\(info.title)|\(info.artist)"
-            let trackChanged = key != self.lastTrackKey
-            self.lastTrackKey = key
-            self.publishTrackInfo(info, key: key, trackChanged: trackChanged)
+            Task { @MainActor in
+                guard let self, let info else { return }
+                let key = "\(info.title)|\(info.artist)"
+                let trackChanged = key != self.lastTrackKey
+                self.lastTrackKey = key
+                self.publishTrackInfo(info, key: key, trackChanged: trackChanged)
+            }
         }
     }
 
     private func publishTrackInfo(_ info: AppleScriptBridge.TrackInfo, key: String, trackChanged: Bool) {
-        DispatchQueue.main.async {
-            let state = PlayerState.shared
+        let state = PlayerState.shared
 
-            let updated = Track(
-                id: key,
-                title: info.title,
-                artist: info.artist,
-                albumArtURL: info.artworkURL ?? (trackChanged ? nil : state.currentTrack.albumArtURL),
-                duration: info.durationSeconds
-            )
-            if state.currentTrack != updated {
-                state.currentTrack = updated
-            }
+        let updated = Track(
+            id: key,
+            title: info.title,
+            artist: info.artist,
+            albumArtURL: info.artworkURL ?? (trackChanged ? nil : state.currentTrack.albumArtURL),
+            duration: info.durationSeconds
+        )
+        if state.currentTrack != updated {
+            state.currentTrack = updated
+        }
 
-            if trackChanged {
-                state.progress = 0
+        if trackChanged {
+            state.progress = 0
 
-                if let artURL = info.artworkURL {
-                    if let cached = AlbumArtLoader.shared.image(for: artURL) {
-                        state.albumArtTrackID = key
-                        state.albumArtImage = cached
-                    }
-                    AlbumArtLoader.shared.load(trackID: key, url: artURL)
+            if let artURL = info.artworkURL {
+                if let cached = AlbumArtLoader.shared.image(for: artURL) {
+                    state.albumArtTrackID = key
+                    state.albumArtImage = cached
                 }
-
-                if SpotifyWebAPI.shared.isAuthenticated {
-                    self.performQueueFetch(force: true)
-                }
+                AlbumArtLoader.shared.load(trackID: key, url: artURL)
             }
 
             if SpotifyWebAPI.shared.isAuthenticated {
-                self.refreshTrackMetadataFromAPI(fallbackTrackKey: key, trackChanged: trackChanged)
+                performQueueFetch(force: true)
             }
+        }
+
+        if SpotifyWebAPI.shared.isAuthenticated {
+            refreshTrackMetadataFromAPI(fallbackTrackKey: key, trackChanged: trackChanged)
         }
     }
 
     private func refreshTrackMetadataFromAPI(fallbackTrackKey: String, trackChanged: Bool) {
         SpotifyWebAPI.shared.fetchCurrentlyPlaying { track, artURL in
-            let state = PlayerState.shared
-            if trackChanged, let track {
-                let merged = Track(
-                    id: fallbackTrackKey,
-                    title: track.title,
-                    artist: track.artist,
-                    albumArtURL: track.albumArtURL ?? state.currentTrack.albumArtURL,
-                    duration: track.duration
-                )
-                if state.currentTrack != merged { state.currentTrack = merged }
-            }
-            if let artURL {
-                AlbumArtLoader.shared.load(trackID: fallbackTrackKey, url: artURL)
+            Task { @MainActor in
+                let state = PlayerState.shared
+                if trackChanged, let track {
+                    let merged = Track(
+                        id: fallbackTrackKey,
+                        title: track.title,
+                        artist: track.artist,
+                        albumArtURL: track.albumArtURL ?? state.currentTrack.albumArtURL,
+                        duration: track.duration
+                    )
+                    if state.currentTrack != merged { state.currentTrack = merged }
+                }
+                if let artURL {
+                    AlbumArtLoader.shared.load(trackID: fallbackTrackKey, url: artURL)
+                }
             }
         }
     }
@@ -166,7 +175,7 @@ final class PollingService {
 
         isQueueFetchInFlight = true
         SpotifyWebAPI.shared.fetchQueue { tracks in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 PlayerState.shared.queue = tracks
                 self.isQueueFetchInFlight = false
                 self.lastQueueFetchAt = Date()

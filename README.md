@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/ayaan-gupta/Vinyl"><img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-2ea594?style=for-the-badge&labelColor=555555" alt="Open Source"></a>
-  <a href="https://github.com/ayaan-gupta/Vinyl/releases"><img src="https://img.shields.io/github/downloads/ayaan-gupta/Vinyl/total?label=downloads&style=for-the-badge&labelColor=555555&color=brightgreen" alt="downloads"></a>
+  <a href="https://github.com/ayaan-gupta/Vinyl/releases"><img src="https://img.shields.io/badge/downloads-Releases-brightgreen?style=for-the-badge&labelColor=555555" alt="downloads"></a>
 </p>
 
 <p align="center">

@@ -30,7 +30,11 @@
 2. Unzip and drag **Vinyl.app** to Applications.
 3. **First launch:** macOS will block the app because it is not signed with an Apple Developer certificate. Either:
    - **Right-click** Vinyl.app → **Open** → **Open** again in the dialog, or
-   - Run in Terminal: `xattr -cr /Applications/Vinyl.app`
+   - Run in Terminal:
+     ```bash
+     xattr -cr /Applications/Vinyl.app
+     open /Applications/Vinyl.app
+     ```
 4. Install and open the **Spotify desktop app** (Premium recommended for queue features).
 5. Click the Vinyl menu bar icon → **Settings** → **Connect to Spotify**.
 6. Grant permissions when prompted:

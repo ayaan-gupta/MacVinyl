@@ -1,10 +1,22 @@
-# Vinyl
+<p align="center">
+  <img src="assets/sir.png" alt="Vinyl" width="720">
+</p>
 
-A macOS menu bar app that controls Spotify with a vinyl turntable UI. Supports Apple and pixel-art themes, queue view, album art, and global keyboard shortcuts.
+<p align="center">
+  <a href="https://github.com/ayaan-gupta/Vinyl"><img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-2ea594?style=for-the-badge&labelColor=555555" alt="Open Source"></a>
+  <a href="https://github.com/ayaan-gupta/Vinyl/releases"><img src="https://img.shields.io/github/downloads/ayaan-gupta/Vinyl/total?label=downloads&style=for-the-badge&labelColor=555555&color=brightgreen" alt="downloads"></a>
+</p>
 
-![macOS](https://img.shields.io/badge/macOS-14%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-5-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
+<p align="center">
+  A macOS menu bar app that controls Spotify with a vinyl turntable UI.<br>
+  Pixel and Apple themes, queue view, album art, and playback controls.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Swift-5-orange" alt="Swift 5">
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
+</p>
 
 ## Download (recommended)
 
@@ -18,8 +30,8 @@ A macOS menu bar app that controls Spotify with a vinyl turntable UI. Supports A
 4. Install and open the **Spotify desktop app** (Premium recommended for queue features).
 5. Click the Vinyl menu bar icon → **Settings** → **Connect to Spotify**.
 6. Grant permissions when prompted:
-   - **Automation** — control Spotify playback
-   - **Accessibility** — optional, for global media key interception
+   - **Automation**: control Spotify playback
+   - **Accessibility**: optional, for global media key interception
 
 > **Why the extra step?** Apple requires a paid Developer Program membership ($99/year) to sign and notarize apps so they open with a double-click and no warning. Vinyl is distributed unsigned to avoid that cost. You only need to approve it once.
 
@@ -27,7 +39,7 @@ A macOS menu bar app that controls Spotify with a vinyl turntable UI. Supports A
 
 - macOS 14.0 or later
 - [Spotify desktop app](https://www.spotify.com/download/mac/)
-- Spotify Premium (recommended — queue and Web API playback features require it)
+- Spotify Premium (recommended for queue and Web API playback features)
 
 ## Permissions
 
@@ -49,7 +61,7 @@ cd Vinyl
 
 ### 2. Spotify Developer setup
 
-Vinyl uses Spotify OAuth with **PKCE** — you only need a **Client ID**, not a client secret.
+Vinyl uses Spotify OAuth with **PKCE**. You only need a **Client ID**, not a client secret.
 
 1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and log in.
 2. **Create app** → name it (e.g. "Vinyl Local").
@@ -101,31 +113,28 @@ The workflow builds Vinyl, embeds the Client ID, zips the app, and attaches it t
 
 ### Optional: Apple Developer signing
 
-If you join the [Apple Developer Program](https://developer.apple.com/programs/), you can sign and notarize releases so users don't need the right-click → Open workaround. That requires adding signing certificates to GitHub Actions — not set up by default.
+If you join the [Apple Developer Program](https://developer.apple.com/programs/), you can sign and notarize releases so users don't need the right-click → Open workaround. That requires adding signing certificates to GitHub Actions and is not set up by default.
 
 ## Project structure
 
 ```
 Vinyl/
+├── assets/                 # README cover art (sir.png)
 ├── Vinyl/                  # App source
 │   ├── SpotifyBridge/      # AppleScript + Web API + OAuth
 │   ├── Views/              # SwiftUI views
-│   ├── Services/           # Hotkeys, polling, album art
+│   ├── Services/           # Polling, album art, spinner
 │   └── Theme/              # Apple + Pixel themes
 ├── Config/Vinyl.xcconfig   # Build config (includes Secrets)
 ├── Secrets.xcconfig.example
 └── .github/workflows/      # CI + release automation
 ```
 
-## Keyboard shortcuts
-
-Configure in **Settings → Keyboard Shortcuts**. Defaults control play/pause, skip, and queue. Media keys are intercepted when Accessibility is granted.
-
 ## Third-party assets
 
-- **Pixelify Sans** font — [SIL Open Font License 1.1](Vinyl/Fonts/OFL.txt)
+- **Pixelify Sans** font: [SIL Open Font License 1.1](Vinyl/Fonts/OFL.txt)
 - Spotify integration subject to [Spotify Developer Terms](https://developer.spotify.com/terms). Vinyl is not affiliated with Spotify.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

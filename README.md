@@ -18,6 +18,12 @@
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
+<p align="center">
+  <img src="assets/preview.png" alt="Vinyl pixel theme" width="420">
+</p>
+
+<p align="center"><em>Pixel theme</em></p>
+
 ## Download (recommended)
 
 1. Go to [Releases](https://github.com/ayaan-gupta/Vinyl/releases) and download `Vinyl.zip` for the latest version.
@@ -116,7 +122,7 @@ If you join the [Apple Developer Program](https://developer.apple.com/programs/)
 
 ```
 Vinyl/
-├── assets/                 # README cover art (sir.png)
+├── assets/                 # README cover art and screenshots
 ├── Vinyl/                  # App source
 │   ├── SpotifyBridge/      # AppleScript + Web API + OAuth
 │   ├── Views/              # SwiftUI views

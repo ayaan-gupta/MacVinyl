@@ -69,6 +69,9 @@ struct SettingsView: View {
                                 Button("Reconnect to Spotify") { SpotifyWebAPI.shared.startOAuthFlow() }
                                     .buttonStyle(.borderedProminent).controlSize(.small)
                             }
+                        } else if !SpotifyConfig.isConfigured {
+                            Text("Spotify connection is unavailable in this build.")
+                                .font(.footnote).foregroundStyle(.secondary)
                         } else {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Connect to unlock album art queue.")

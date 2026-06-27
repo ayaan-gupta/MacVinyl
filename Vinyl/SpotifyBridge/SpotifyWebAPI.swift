@@ -2,14 +2,6 @@ import AppKit
 import Foundation
 import Combine
 
-// MARK: - Configuration
-// Replace with your Spotify Developer app credentials:
-// https://developer.spotify.com/dashboard
-private let kClientID     = "REDACTED_CLIENT_ID"
-private let kClientSecret = "REDACTED_CLIENT_SECRET"
-private let kRedirectURI  = "vinyl://callback"
-private let kScopes       = "user-read-playback-state user-read-currently-playing user-read-recently-played user-modify-playback-state"
-
 // MARK: - Codable models
 
 private struct TokenResponse: Decodable {
@@ -125,6 +117,7 @@ final class SpotifyWebAPI: ObservableObject {
 
     private var tokenExpiresAt: Date = .distantPast
     private var proactiveRefreshTask: DispatchWorkItem?
+    private var pkceVerifier: String?
 
     var isAuthenticated: Bool { cachedAccessToken != nil && cachedRefreshToken != nil }
 
@@ -152,12 +145,22 @@ final class SpotifyWebAPI: ObservableObject {
     // MARK: - OAuth
 
     func startOAuthFlow() {
+        guard SpotifyConfig.isConfigured else {
+            print("[Spotify] OAuth skipped: Spotify Client ID is not configured in this build.")
+            return
+        }
+
+        let verifier = PKCE.generateVerifier()
+        pkceVerifier = verifier
+
         var components = URLComponents(string: "https://accounts.spotify.com/authorize")!
         components.queryItems = [
-            URLQueryItem(name: "client_id", value: kClientID),
+            URLQueryItem(name: "client_id", value: SpotifyConfig.clientID),
             URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "redirect_uri", value: kRedirectURI),
-            URLQueryItem(name: "scope", value: kScopes),
+            URLQueryItem(name: "redirect_uri", value: SpotifyConfig.redirectURI),
+            URLQueryItem(name: "scope", value: SpotifyConfig.scopes),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "code_challenge", value: PKCE.challenge(for: verifier)),
             URLQueryItem(name: "show_dialog", value: "true"),
         ]
         guard let url = components.url else { return }
@@ -180,10 +183,23 @@ final class SpotifyWebAPI: ObservableObject {
     }
 
     private func exchangeCode(_ code: String) {
+        guard let verifier = pkceVerifier else {
+            print("[Spotify] OAuth error: missing PKCE verifier")
+            PlayerState.shared.authState = .needsReauth
+            return
+        }
+        pkceVerifier = nil
+
         var request = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "grant_type=authorization_code&code=\(code)&redirect_uri=\(kRedirectURI)&client_id=\(kClientID)&client_secret=\(kClientSecret)"
+        let body = [
+            "grant_type=authorization_code",
+            "code=\(code)",
+            "redirect_uri=\(SpotifyConfig.redirectURI)",
+            "client_id=\(SpotifyConfig.clientID)",
+            "code_verifier=\(verifier)",
+        ].joined(separator: "&")
         request.httpBody = body.data(using: .utf8)
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -235,7 +251,7 @@ final class SpotifyWebAPI: ObservableObject {
         var request = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "grant_type=refresh_token&refresh_token=\(token)&client_id=\(kClientID)&client_secret=\(kClientSecret)"
+        let body = "grant_type=refresh_token&refresh_token=\(token)&client_id=\(SpotifyConfig.clientID)"
         request.httpBody = body.data(using: .utf8)
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -284,7 +300,8 @@ final class SpotifyWebAPI: ObservableObject {
                 guard !success else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                     self?.refreshAccessToken { success in
-                        if !success { self?.startOAuthFlow() }
+                        guard !success, SpotifyConfig.isConfigured else { return }
+                        self?.startOAuthFlow()
                     }
                 }
             }

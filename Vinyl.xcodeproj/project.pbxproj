@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		B1AF3E6F2FEE1035001CD713 /* Vinyl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Vinyl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1AF3E702FEDF15C001CD713 /* Vinyl.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Vinyl.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -42,9 +43,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B1AF3E712FEDF15C001CD713 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				B1AF3E702FEDF15C001CD713 /* Vinyl.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		B1AF3E202FEDF159001CD713 = {
 			isa = PBXGroup;
 			children = (
+				B1AF3E712FEDF15C001CD713 /* Config */,
 				B1AF3E2B2FEDF159001CD713 /* Vinyl */,
 				B1AF3E6F2FEE1035001CD713 /* Vinyl.app */,
 			);
@@ -254,6 +264,7 @@
 		};
 		B1AF3E352FEDF15B001CD713 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B1AF3E702FEDF15C001CD713 /* Vinyl.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -287,6 +298,7 @@
 		};
 		B1AF3E362FEDF15B001CD713 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B1AF3E702FEDF15C001CD713 /* Vinyl.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

@@ -10,7 +10,10 @@ enum SpotifyConfig {
             return ""
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("YOUR_") else { return "" }
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("YOUR_"),
+              trimmed != "ci_build_placeholder",
+              !trimmed.contains("REDACTED") else { return "" }
         return trimmed
     }
 

@@ -20,8 +20,6 @@
 
 ## Download (recommended)
 
-**No Xcode required.**
-
 1. Go to [Releases](https://github.com/ayaan-gupta/Vinyl/releases) and download `Vinyl.zip` for the latest version.
 2. Unzip and drag **Vinyl.app** to Applications.
 3. **First launch:** macOS will block the app because it is not signed with an Apple Developer certificate. Either:
@@ -46,7 +44,6 @@
 | Permission | Purpose |
 |------------|---------|
 | Automation (Apple Events) | Play/pause, skip, read track info from Spotify |
-| Accessibility | Intercept media keys (play/pause, next, previous) system-wide |
 
 ## Building from source
 

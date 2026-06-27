@@ -9,8 +9,11 @@ final class HotkeyService {
     private var runLoopSource: CFRunLoopSource?
     private var accessibilityCheckTimer: Timer?
 
-    // Custom shortcut monitoring via NSEvent global monitor
-    private var customMonitor: Any?
+    // Custom shortcut monitoring via NSEvent global + local monitors
+    private var customGlobalMonitor: Any?
+    private var customLocalMonitor: Any?
+
+    private static let relevantModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
 
     private init() {}
 
@@ -27,28 +30,47 @@ final class HotkeyService {
     // MARK: - Custom shortcuts (NSEvent global monitor)
 
     func installCustomMonitor() {
-        if let m = customMonitor { NSEvent.removeMonitor(m); customMonitor = nil }
+        if let m = customGlobalMonitor { NSEvent.removeMonitor(m); customGlobalMonitor = nil }
+        if let m = customLocalMonitor { NSEvent.removeMonitor(m); customLocalMonitor = nil }
+
+        // Global: other apps frontmost (requires Accessibility trust).
+        customGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            _ = Self.handleCustomHotkey(event)
+        }
+
+        // Local: Vinyl is key (popover open) — works without Accessibility.
+        customLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            Self.handleCustomHotkey(event) ? nil : event
+        }
+    }
+
+    /// Returns true when the event matched a configured shortcut and was handled.
+    @discardableResult
+    private static func handleCustomHotkey(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(relevantModifiers)
+        let code = event.keyCode
         let config = HotkeyConfig.shared
-        customMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
-            let code = event.keyCode
-            for action in HotkeyAction.allCases {
-                let b = config.binding(for: action)
-                if code == b.keyCode && NSEvent.ModifierFlags(rawValue: b.modifierRaw) == mods {
-                    switch action {
-                    case .playPause:
-                        PlayerState.shared.togglePlayingOptimistically()
-                        AppleScriptBridge.playPause()
-                        PollingService.shared.refreshNow()
-                    case .previous:
-                        PlayerState.shared.requestSkip(direction: -1)
-                    case .next:
-                        PlayerState.shared.requestSkip(direction: 1)
-                    }
-                    break
+
+        for action in HotkeyAction.allCases {
+            let binding = config.binding(for: action)
+            let boundMods = binding.modifiers.intersection(relevantModifiers)
+            guard code == binding.keyCode, mods == boundMods else { continue }
+
+            DispatchQueue.main.async {
+                switch action {
+                case .playPause:
+                    PlayerState.shared.togglePlayingOptimistically()
+                    AppleScriptBridge.playPause()
+                    PollingService.shared.refreshNow()
+                case .previous:
+                    PlayerState.shared.requestSkip(direction: -1)
+                case .next:
+                    PlayerState.shared.requestSkip(direction: 1)
                 }
             }
+            return true
         }
+        return false
     }
 
     // MARK: - Media key interception (CGEventTap)
@@ -112,6 +134,7 @@ final class HotkeyService {
                 t.invalidate()
                 self.accessibilityCheckTimer = nil
                 self.installEventTap()
+                self.installCustomMonitor()
             }
         }
     }
@@ -122,6 +145,7 @@ final class HotkeyService {
         eventTap = nil
         runLoopSource = nil
         accessibilityCheckTimer?.invalidate()
-        if let m = customMonitor { NSEvent.removeMonitor(m); customMonitor = nil }
+        if let m = customGlobalMonitor { NSEvent.removeMonitor(m); customGlobalMonitor = nil }
+        if let m = customLocalMonitor { NSEvent.removeMonitor(m); customLocalMonitor = nil }
     }
 }

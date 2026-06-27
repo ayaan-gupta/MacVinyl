@@ -10,13 +10,17 @@ enum PixelTheme {
     static let contentPadding: CGFloat = 14
     static let sectionSpacing: CGFloat = 12
 
-    static let titleFont: Font = Font.custom("PixelifySans-Regular", size: 12).weight(.bold)
-    static let artistFont: Font = Font.custom("PixelifySans-Regular", size: 11)
+    static let titleFont: Font = Font.custom("PixelifySans-Regular", size: 14)
+    static let artistFont: Font = Font.custom("PixelifySans-Regular", size: 13)
     static let timestampFont: Font = Font.custom("PixelifySans-Regular", size: 10)
     static let queueRowFont: Font = Font.custom("PixelifySans-Regular", size: 10)
 
+    /// AppKit fonts paired with SwiftUI fonts for MarqueeText width measurement.
+    static let titleMeasurementFont: NSFont = pixelFont(size: 14)
+    static let artistMeasurementFont: NSFont = pixelFont(size: 13)
+
     static let primaryTextColor: Color = Color(red: 0.95, green: 0.88, blue: 0.72, alpha: 1)
-    static let secondaryTextColor: Color = Color(red: 0.72, green: 0.65, blue: 0.50, alpha: 1)
+    static let secondaryTextColor: Color = Color(red: 0.88, green: 0.74, blue: 0.42, alpha: 1)
     static let progressTrackColor: Color = Color(red: 0.28, green: 0.22, blue: 0.15, alpha: 1)
     static let progressFillColor: Color = Color(red: 0.56, green: 0.78, blue: 0.40, alpha: 1)
     static let accentColor: Color = Color(red: 0.56, green: 0.78, blue: 0.40, alpha: 1)
@@ -31,6 +35,10 @@ enum PixelTheme {
 
     /// Fallback queue strip height until the open layout is measured once.
     static let estimatedQueueSectionHeight: CGFloat = 120
+
+    private static func pixelFont(size: CGFloat) -> NSFont {
+        NSFont(name: "PixelifySans-Regular", size: size) ?? .systemFont(ofSize: size)
+    }
 }
 
 extension Color {

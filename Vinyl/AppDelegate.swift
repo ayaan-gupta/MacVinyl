@@ -7,7 +7,7 @@ import CoreText
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var panelController: MenuBarPanelController!
     private var menuBarCoordinator: MenuBarIconCoordinator!
     private let themeSettings = ThemeSettings.shared
     private let playerState = PlayerState.shared
@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerBundleFonts()
         setupMenuBar()
-        setupPopover()
+        setupPanel()
         setupOAuthHandler()
         setupWakeObserver()
         startServices()
@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         guard let button = statusItem.button else { return }
-        button.action = #selector(togglePopover)
+        button.action = #selector(togglePanel)
         button.target = self
 
         // Size the custom spinning view to sit centered inside the 22pt slot
@@ -55,65 +55,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
     }
 
-    // MARK: - Popover
+    // MARK: - Panel
 
-    private func setupPopover() {
-        popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = true
+    private func setupPanel() {
+        panelController = MenuBarPanelController()
 
         let rootView = PopoverView(playerState: playerState, onSizeChange: { [weak self] size, animated in
-            guard let self, let pop = self.popover else { return }
-            guard size.height > 10 else { return }
-            let newSize = NSSize(width: size.width, height: size.height)
-            if animated {
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.35
-                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    context.allowsImplicitAnimation = false
-                    pop.contentSize = newSize
-                    pop.contentViewController?.view.layoutSubtreeIfNeeded()
-                }
-            } else {
-                pop.contentSize = newSize
-            }
+            guard let self else { return }
+            guard size.height > 10, size.width > 0 else { return }
+            self.panelController.updateContentSize(
+                NSSize(width: size.width, height: size.height),
+                animated: animated
+            )
         })
         .environmentObject(themeSettings)
 
-        let vc = NSHostingController(rootView: rootView)
-        vc.view.wantsLayer = true
-        vc.view.layer?.backgroundColor = NSColor.clear.cgColor
-        vc.view.setFrameSize(NSSize(width: AppleTheme.popoverWidth, height: 400))
-        popover.contentViewController = vc
-        popover.contentSize = NSSize(width: AppleTheme.popoverWidth, height: 400)
-        vc.view.layoutSubtreeIfNeeded()
+        panelController.configure(rootView: rootView)
     }
 
-    @objc private func togglePopover() {
+    @objc private func togglePanel() {
         guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            showPopover(from: button)
-        }
-    }
-
-    private func showPopover(from button: NSStatusBarButton) {
-        NSApp.activate(ignoringOtherApps: true)
-
-        // The status item window may not have finished layout on the first click
-        // after launch; defer one run loop so bounds and isFlipped are reliable.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let button = self.statusItem.button, !self.popover.isShown else { return }
-
-            button.window?.layoutIfNeeded()
-            button.layoutSubtreeIfNeeded()
-
-            // Flipped status bar buttons anchor below on .maxY; standard coords use .minY.
-            let edge: NSRectEdge = button.isFlipped ? .maxY : .minY
-            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: edge)
-            self.popover.contentViewController?.view.window?.makeKey()
-        }
+        panelController.toggle(anchor: button)
     }
 
     // MARK: - OAuth
@@ -169,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PollingService.shared.start()
         HotkeyService.shared.start()
 
-        // Keep spinner in sync with isPlaying even while popover is closed
+        // Keep spinner in sync with isPlaying even while panel is closed
         playerState.$isPlaying
             .receive(on: DispatchQueue.main)
             .sink { playing in
@@ -178,18 +140,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else if !playing {
                     VinylSpinner.shared.targetDegreesPerSecond = 0
                 }
-            }
-            .store(in: &cancellables)
-
-        // On theme switch, reset contentSize to height=1 so the new theme's
-        // SizePreferenceKey always fires and overrides the stale size.
-        themeSettings.$active
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] newTheme in
-                guard let self, let pop = self.popover else { return }
-                let w = newTheme == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
-                pop.contentSize = NSSize(width: w, height: 1)
             }
             .store(in: &cancellables)
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Continuous, seamless marquee text driven by TimelineView (display-link cadence).
 /// - Scrolls without any pause between passes — wraps are visually seamless because
@@ -8,6 +9,11 @@ struct MarqueeText: View {
     let text: String
     let font: Font
     let color: Color
+    /// When set, used instead of GeometryReader measurement (more reliable in nested layouts).
+    var width: CGFloat? = nil
+    /// AppKit font for width measurement. Required for custom fonts where SwiftUI
+    /// GeometryReader sizing is constrained to the clipped container width.
+    var measurementFont: NSFont? = nil
 
     @State private var naturalWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
@@ -18,8 +24,10 @@ struct MarqueeText: View {
     private let gap: CGFloat = 30
     private let speed: CGFloat = 44   // points per second
 
+    private var effectiveContainerWidth: CGFloat { width ?? containerWidth }
+
     private var needsScroll: Bool {
-        naturalWidth > 0 && containerWidth > 0 && naturalWidth > containerWidth
+        naturalWidth > 0 && effectiveContainerWidth > 0 && naturalWidth > effectiveContainerWidth
     }
 
     private var scrollDist: CGFloat { naturalWidth + gap }
@@ -36,7 +44,8 @@ struct MarqueeText: View {
 
     var body: some View {
         Color.clear
-            .frame(maxWidth: .infinity, minHeight: 20)
+            .frame(width: width, alignment: .leading)
+            .frame(maxWidth: width == nil ? .infinity : nil, minHeight: 20)
             // Hover detection on the clipped container so the hit-test area
             // matches exactly what the user sees — not the wider HStack.
             .onHover { hovering in
@@ -73,32 +82,31 @@ struct MarqueeText: View {
                 }
             }
             .clipped()
-            // Measure container width
-            .background(
-                GeometryReader { g in
-                    Color.clear
-                        .onAppear { containerWidth = g.size.width }
-                        .onChange(of: g.size.width) { _, w in containerWidth = w }
-                }
-            )
-            // Measure natural (unconstrained) text width via an invisible copy.
-            // Reset cycleStart here so the scroll always begins at position 0.
-            .background(
-                Text(text).font(font).lineLimit(1).fixedSize().opacity(0)
-                    .background(GeometryReader { g in
+            // Measure container width (skipped when an explicit width is provided).
+            .background {
+                if width == nil {
+                    GeometryReader { g in
                         Color.clear
-                            .onAppear {
-                                naturalWidth = g.size.width
-                                cycleStart = .now   // start from x=0 once measured
-                            }
-                            .onChange(of: g.size.width) { _, w in
-                                naturalWidth = w
-                                cycleStart = .now
-                            }
-                    })
-            )
+                            .onAppear { containerWidth = g.size.width }
+                            .onChange(of: g.size.width) { _, w in containerWidth = w }
+                    }
+                }
+            }
+            // Measure natural text width — AppKit sizing for custom fonts, otherwise
+            // an invisible SwiftUI copy (works for system fonts in unconstrained layouts).
+            .background {
+                if measurementFont == nil {
+                    Text(text).font(font).lineLimit(1).fixedSize().opacity(0)
+                        .background(GeometryReader { g in
+                            Color.clear
+                                .onAppear { applyNaturalWidth(g.size.width) }
+                                .onChange(of: g.size.width) { _, w in applyNaturalWidth(w) }
+                        })
+                }
+            }
+            .onAppear { refreshMeasuredWidth() }
             .onChange(of: text) { _, _ in
-                naturalWidth = 0
+                refreshMeasuredWidth()
                 cycleStart = .now
                 isHovering = false
                 hoverStart = nil
@@ -107,5 +115,17 @@ struct MarqueeText: View {
 
     private var label: some View {
         Text(text).font(font).foregroundStyle(color).lineLimit(1).fixedSize()
+    }
+
+    private func refreshMeasuredWidth() {
+        guard let measurementFont else { return }
+        let w = ceil((text as NSString).size(withAttributes: [.font: measurementFont]).width)
+        applyNaturalWidth(w)
+    }
+
+    private func applyNaturalWidth(_ w: CGFloat) {
+        guard w > 0 else { return }
+        naturalWidth = w
+        cycleStart = .now
     }
 }

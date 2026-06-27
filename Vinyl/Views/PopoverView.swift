@@ -49,6 +49,7 @@ struct PopoverView: View {
     @State private var showQueue = false
     @State private var pixelHeights = PixelPopoverHeights()
     @State private var queueResizeInProgress = false
+    @State private var lastContentHeight: CGFloat = 0
 
     private var contentWidth: CGFloat {
         themeSettings.active == .pixel ? PixelTheme.popoverWidth : AppleTheme.popoverWidth
@@ -62,7 +63,7 @@ struct PopoverView: View {
                 isSettings: showSettings,
                 pixelHeights: pixelHeights
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             Group {
                 if showSettings {
@@ -76,9 +77,12 @@ struct PopoverView: View {
                     PlayerContentView(
                         playerState: playerState,
                         showQueue: $showQueue,
-                        onShowSettings: { withAnimation { showSettings = true } }
+                        onShowSettings: { withAnimation { showSettings = true } },
+                        onToggleQueue: { toggleQueue() },
+                        onMeasured: { handleMeasured($0) }
                     )
                     .environmentObject(themeSettings)
+                    .id(themeSettings.active)
                     .transition(.asymmetric(insertion: .move(edge: .leading),
                                             removal:   .move(edge: .leading)))
                 }
@@ -86,38 +90,86 @@ struct PopoverView: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showSettings)
             .frame(width: contentWidth, alignment: .top)
             .fixedSize(horizontal: false, vertical: true)
+            .background {
+                if showSettings {
+                    GeometryReader { geo in
+                        Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
+                    }
+                }
+            }
         }
         .frame(width: contentWidth)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(PopoverChromeHider().frame(width: 0, height: 0))
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: SizePreferenceKey.self, value: geo.size)
-            }
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onPreferenceChange(PixelPopoverHeightsKey.self) { pixelHeights = $0 }
+        // SettingsView is the only emitter of SizePreferenceKey (see the conditional
+        // background above). Player content is sized via handleMeasured instead.
         .onPreferenceChange(SizePreferenceKey.self) { size in
+            guard size.height > 10 else { return }
             guard !queueResizeInProgress else { return }
-            onSizeChange?(size, false)
+            lastContentHeight = size.height
+            onSizeChange?(CGSize(width: contentWidth, height: size.height), false)
         }
-        .onChange(of: showQueue) { _, open in
-            let collapsed = pixelHeights.collapsed
-            guard collapsed > 10 else {
-                onSizeChange?(CGSize(width: contentWidth, height: 1), false)
-                return
-            }
-            let expanded = pixelHeights.expanded > 0
-                ? pixelHeights.expanded
-                : collapsed + PixelTheme.estimatedQueueSectionHeight
-            let target = open ? expanded : collapsed
-            queueResizeInProgress = true
-            onSizeChange?(CGSize(width: contentWidth, height: target), true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        .onChange(of: themeSettings.active) { _, _ in
+            // Collapse the queue and clear any in-flight queue animation so the
+            // freshly-rebuilt PlayerContentView measures cleanly. handleMeasured
+            // (a direct per-instance callback, immune to the last-writer-wins
+            // SizePreferenceKey reduce) will resize the panel to the new theme.
+            showQueue = false
+            queueResizeInProgress = false
+        }
+        .onChange(of: showSettings) { _, showing in
+            if !showing {
                 queueResizeInProgress = false
             }
         }
-        .onChange(of: showSettings) { _, _ in
-            onSizeChange?(CGSize(width: contentWidth, height: 1), false)
+    }
+
+    /// Resize driven by the live player-content measurement. Runs for every player
+    /// size change except while a queue open/close animation owns the panel.
+    private func handleMeasured(_ size: CGSize) {
+        guard size.height > 10 else { return }
+        lastContentHeight = size.height
+        guard !queueResizeInProgress else { return }
+        onSizeChange?(CGSize(width: contentWidth, height: size.height), false)
+    }
+
+    private func toggleQueue() {
+        // Set the guard *before* showQueue changes so the content growing/shrinking
+        // cannot trigger a non-animated snap before the animated resize runs. This
+        // makes open and close symmetric.
+        queueResizeInProgress = true
+        let open = !showQueue
+        showQueue = open
+        if open { PollingService.shared.refreshQueueNow() }
+        applyQueuePanelSize(open: open)
+    }
+
+    private func applyQueuePanelSize(open: Bool) {
+        if open {
+            // Wait for layout so expanded height is measured before animating.
+            DispatchQueue.main.async {
+                DispatchQueue.main.async {
+                    let collapsed = pixelHeights.collapsed > 10 ? pixelHeights.collapsed : lastContentHeight
+                    let expanded = pixelHeights.expanded > 10
+                        ? pixelHeights.expanded
+                        : collapsed + PixelTheme.estimatedQueueSectionHeight
+                    guard expanded > 10 else { queueResizeInProgress = false; return }
+                    resizePanel(to: expanded, animated: true)
+                }
+            }
+        } else {
+            let collapsed = pixelHeights.collapsed > 10 ? pixelHeights.collapsed : lastContentHeight
+            guard collapsed > 10 else { queueResizeInProgress = false; return }
+            resizePanel(to: collapsed, animated: true)
+        }
+    }
+
+    private func resizePanel(to height: CGFloat, animated: Bool) {
+        guard height > 10 else { return }
+        queueResizeInProgress = true
+        onSizeChange?(CGSize(width: contentWidth, height: height), animated)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+            queueResizeInProgress = false
         }
     }
 }
@@ -227,6 +279,8 @@ struct PlayerContentView: View {
     @Binding var showQueue: Bool
     @EnvironmentObject var themeSettings: ThemeSettings
     let onShowSettings: () -> Void
+    let onToggleQueue: () -> Void
+    let onMeasured: (CGSize) -> Void
 
     @State private var displayedTrack: Track
     @State private var displayedImage: NSImage?
@@ -248,10 +302,16 @@ struct PlayerContentView: View {
         static let settle: Double = 0.15
     }
 
-    init(playerState: PlayerState, showQueue: Binding<Bool>, onShowSettings: @escaping () -> Void) {
+    init(playerState: PlayerState,
+         showQueue: Binding<Bool>,
+         onShowSettings: @escaping () -> Void,
+         onToggleQueue: @escaping () -> Void,
+         onMeasured: @escaping (CGSize) -> Void) {
         self.playerState = playerState
         _showQueue = showQueue
         self.onShowSettings = onShowSettings
+        self.onToggleQueue = onToggleQueue
+        self.onMeasured = onMeasured
         _displayedTrack = State(initialValue: playerState.currentTrack)
         _displayedImage = State(initialValue: playerState.albumArtImage)
         _lastTrackID = State(initialValue: playerState.currentTrack.id)
@@ -262,6 +322,9 @@ struct PlayerContentView: View {
     private var contentWidth: CGFloat {
         isApple ? AppleTheme.popoverWidth : PixelTheme.popoverWidth
     }
+
+    /// Inner width for title/artist marquee rows (content width minus horizontal padding).
+    private var marqueeWidth: CGFloat { contentWidth - 28 }
 
     private var slideWidth: CGFloat { contentWidth + 30 }
 
@@ -305,7 +368,6 @@ struct PlayerContentView: View {
                 if showQueue {
                     Rectangle().fill(Color(white: 1, opacity: 0.1)).frame(height: 1).padding(.horizontal, 10)
                     QueueView(playerState: playerState, theme: themeSettings.active)
-                        .transition(.opacity)
                         .padding(.bottom, 6)
                 }
             }
@@ -315,18 +377,22 @@ struct PlayerContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
         }
-        .onChange(of: showQueue) { _, isOpen in
-            if isOpen { PollingService.shared.refreshQueueNow() }
+        .onChange(of: themeSettings.active) { _, _ in
+            storedCollapsedHeight = 0
+            storedExpandedHeight = 0
         }
         .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { geo in
                 Color.clear
-                    .onAppear { recordPopoverHeight(geo.size.height) }
-                    .onChange(of: geo.size.height) { _, height in
-                        recordPopoverHeight(height)
+                    .onAppear {
+                        recordPopoverHeight(geo.size.height)
+                        onMeasured(geo.size)
                     }
-                    .preference(key: SizePreferenceKey.self, value: geo.size)
+                    .onChange(of: geo.size) { _, size in
+                        recordPopoverHeight(size.height)
+                        onMeasured(size)
+                    }
                     .preference(
                         key: PixelPopoverHeightsKey.self,
                         value: PixelPopoverHeights(
@@ -431,9 +497,7 @@ struct PlayerContentView: View {
     }
 
     private func toggleQueue() {
-        withAnimation(.easeInOut(duration: 0.35)) {
-            showQueue.toggle()
-        }
+        onToggleQueue()
     }
 
     private func topBarButton(_ symbol: String, action: @escaping () -> Void) -> some View {
@@ -475,11 +539,13 @@ struct PlayerContentView: View {
                 .padding(.bottom, 14)
 
             VStack(spacing: 3) {
-                MarqueeText(text: track.title, font: .system(size: 14, weight: .semibold), color: .white)
+                MarqueeText(text: track.title, font: .system(size: 14, weight: .semibold), color: .white, width: marqueeWidth)
                     .textSelection(.enabled)
-                MarqueeText(text: track.artist, font: .system(size: 12), color: Color(white: 1, opacity: 0.6))
+                MarqueeText(text: track.artist, font: .system(size: 12), color: Color(white: 1, opacity: 0.6), width: marqueeWidth)
                     .textSelection(.enabled)
             }
+            .frame(width: marqueeWidth)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
         }
@@ -488,11 +554,25 @@ struct PlayerContentView: View {
 
     private func pixelTrackInfo(track: Track) -> some View {
         VStack(spacing: 2) {
-            MarqueeText(text: track.title, font: PixelTheme.titleFont, color: PixelTheme.primaryTextColor)
+            MarqueeText(
+                text: track.title,
+                font: PixelTheme.titleFont,
+                color: PixelTheme.primaryTextColor,
+                width: marqueeWidth,
+                measurementFont: PixelTheme.titleMeasurementFont
+            )
                 .textSelection(.enabled)
-            MarqueeText(text: track.artist, font: PixelTheme.artistFont, color: PixelTheme.secondaryTextColor)
+            MarqueeText(
+                text: track.artist,
+                font: PixelTheme.artistFont,
+                color: PixelTheme.secondaryTextColor,
+                width: marqueeWidth,
+                measurementFont: PixelTheme.artistMeasurementFont
+            )
                 .textSelection(.enabled)
         }
+        .frame(width: marqueeWidth)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
         .frame(width: contentWidth)
     }

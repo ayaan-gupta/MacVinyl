@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var themeSettings: ThemeSettings
     @ObservedObject var playerState: PlayerState
-    @ObservedObject private var hotkeyConfig = HotkeyConfig.shared
     var onDismiss: () -> Void
 
     private var contentWidth: CGFloat {
@@ -49,32 +48,6 @@ struct SettingsView: View {
 
                     Divider()
 
-                    // ── Keyboard Shortcuts ────────────────────────────
-                    sectionHeader("Keyboard Shortcuts", icon: "keyboard")
-
-                    VStack(spacing: 6) {
-                        ForEach(HotkeyAction.allCases) { action in
-                            HotkeyRow(action: action, config: hotkeyConfig)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-
-                    HStack {
-                        Spacer()
-                        Button("Reset to Defaults") {
-                            hotkeyConfig.resetToDefaults()
-                            HotkeyService.shared.installCustomMonitor()
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                    .padding(.bottom, 16)
-
-                    Divider()
-
                     // ── Spotify ───────────────────────────────────────
                     sectionHeader("Spotify", icon: "music.note")
 
@@ -111,7 +84,7 @@ struct SettingsView: View {
             }
         }
         .frame(width: contentWidth)
-        .frame(minHeight: 420)
+        .frame(minHeight: 280)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -122,68 +95,6 @@ struct SettingsView: View {
             .padding(.horizontal, 14)
             .padding(.top, 12)
             .padding(.bottom, 8)
-    }
-}
-
-// MARK: - Hotkey row with live recorder
-
-struct HotkeyRow: View {
-    let action: HotkeyAction
-    @ObservedObject var config: HotkeyConfig
-
-    @State private var isRecording = false
-    @State private var localMonitor: Any?
-
-    var body: some View {
-        HStack {
-            Text(action.displayName)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
-            Spacer()
-            Button {
-                isRecording ? stopRecording() : startRecording()
-            } label: {
-                Text(isRecording ? "Press keys…" : config.binding(for: action).displayString)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(isRecording ? Color.accentColor : .primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(Color(NSColor.controlBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(
-                                        isRecording ? Color.accentColor : Color(NSColor.separatorColor),
-                                        lineWidth: 1
-                                    )
-                            )
-                    )
-            }
-            .buttonStyle(.plain)
-            .animation(.easeInOut(duration: 0.15), value: isRecording)
-        }
-        .padding(.vertical, 3)
-        .onDisappear { stopRecording() }
-    }
-
-    private func startRecording() {
-        isRecording = true
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { self.stopRecording(); return nil }  // Esc = cancel
-            let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
-            guard !mods.isEmpty else { return event }
-            let binding = HotkeyBinding(keyCode: event.keyCode, modifierRaw: mods.rawValue)
-            self.config.set(binding, for: self.action)
-            HotkeyService.shared.installCustomMonitor()
-            self.stopRecording()
-            return nil
-        }
-    }
-
-    private func stopRecording() {
-        isRecording = false
-        if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
     }
 }
 

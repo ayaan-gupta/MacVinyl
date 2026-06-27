@@ -2,8 +2,8 @@ import SwiftUI
 import Combine
 
 enum AppTheme: String, CaseIterable, Identifiable {
-    case apple
     case pixel
+    case apple
 
     var id: String { rawValue }
 
@@ -24,6 +24,6 @@ final class ThemeSettings: ObservableObject {
 
     private init() {
         let stored = UserDefaults.standard.string(forKey: "activeTheme") ?? ""
-        active = AppTheme(rawValue: stored) ?? .apple
+        active = AppTheme(rawValue: stored) ?? .pixel
     }
 }

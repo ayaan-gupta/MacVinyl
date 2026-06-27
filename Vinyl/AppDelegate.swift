@@ -129,7 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         VinylSpinner.shared.start()
         PollingService.shared.start()
-        HotkeyService.shared.start()
 
         // Keep spinner in sync with isPlaying even while panel is closed
         playerState.$isPlaying

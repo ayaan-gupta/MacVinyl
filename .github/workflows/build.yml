@@ -1,0 +1,26 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Spotify Client ID for CI
+        run: echo "SPOTIFY_CLIENT_ID = ci_build_placeholder" > Secrets.xcconfig
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project Vinyl.xcodeproj \
+            -scheme Vinyl \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build

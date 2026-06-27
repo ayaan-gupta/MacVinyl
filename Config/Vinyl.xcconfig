@@ -1,0 +1,3 @@
+#include? "../Secrets.xcconfig"
+
+INFOPLIST_KEY_SpotifyClientID = $(SPOTIFY_CLIENT_ID)

@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Spotify Client ID
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+        run: |
+          if [[ -z "$SPOTIFY_CLIENT_ID" ]]; then
+            echo "::error::Set SPOTIFY_CLIENT_ID in repo Secrets (Settings → Secrets → Actions)"
+            exit 1
+          fi
+          echo "SPOTIFY_CLIENT_ID = $SPOTIFY_CLIENT_ID" > Secrets.xcconfig
+
+      - name: Build Release
+        run: |
+          xcodebuild \
+            -project Vinyl.xcodeproj \
+            -scheme Vinyl \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package
+        run: |
+          APP="build/Build/Products/Release/Vinyl.app"
+          ditto -c -k --keepParent "$APP" Vinyl.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Vinyl.zip
+          generate_release_notes: true

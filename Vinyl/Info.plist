@@ -8,6 +8,8 @@
 	<string>Fonts</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Vinyl controls Spotify playback using Apple Events.</string>
+	<key>SpotifyClientID</key>
+	<string>$(SPOTIFY_CLIENT_ID)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

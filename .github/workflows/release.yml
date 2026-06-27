@@ -24,6 +24,20 @@ jobs:
           fi
           echo "SPOTIFY_CLIENT_ID = $SPOTIFY_CLIENT_ID" > Secrets.xcconfig
 
+      - name: Verify build settings resolve Spotify Client ID
+        run: |
+          RESOLVED="$(xcodebuild \
+            -project Vinyl.xcodeproj \
+            -scheme Vinyl \
+            -configuration Release \
+            -derivedDataPath build \
+            -showBuildSettings 2>/dev/null | sed -n 's/^ *SPOTIFY_CLIENT_ID = //p' | head -1)"
+          if [[ -z "$RESOLVED" || "$RESOLVED" == "ci_build_placeholder" || "$RESOLVED" == *"YOUR_"* ]]; then
+            echo "::error::SPOTIFY_CLIENT_ID did not resolve in Xcode build settings (got: '${RESOLVED:-<empty>}')"
+            exit 1
+          fi
+          echo "SPOTIFY_CLIENT_ID resolves in build settings."
+
       - name: Build Release
         run: |
           xcodebuild \
@@ -33,6 +47,17 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Verify Spotify Client ID is embedded
+        run: |
+          APP="build/Build/Products/Release/Vinyl.app"
+          CLIENT_ID="$(plutil -extract SpotifyClientID raw "$APP/Contents/Info.plist" 2>/dev/null || true)"
+          if [[ -z "$CLIENT_ID" || "$CLIENT_ID" == "ci_build_placeholder" || "$CLIENT_ID" == *"YOUR_"* ]]; then
+            echo "::error::SpotifyClientID missing or invalid in built app Info.plist"
+            plutil -p "$APP/Contents/Info.plist" | grep -i spotify || true
+            exit 1
+          fi
+          echo "SpotifyClientID is present in release build."
 
       - name: Package
         run: |
